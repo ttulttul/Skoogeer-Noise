@@ -10,6 +10,8 @@ and debug nodes can be installed independently.
 
 - `Latent Mesh Drag` (`latent/perturb`)
 - `Image Mesh Drag` (`image/perturb`)
+- `Latent Noise` (`latent/perturb`)
+- `Image Noise` (`image/perturb`)
 - `Latent Channel Stats Preview` (`latent/debug`)
 
 ## Installation
@@ -19,6 +21,27 @@ Clone into your ComfyUI `custom_nodes/` directory and restart ComfyUI.
 ## Development
 
 Run tests with `pytest`.
+
+## Noise
+
+`Latent Noise` and `Image Noise` add seeded Gaussian noise to `LATENT` / `IMAGE` tensors.
+Noise strength is relative to the standard deviation of the input tensor.
+
+### Node Parameters: Latent Noise
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `latent` | LATENT | – | Latent to receive additional noise. |
+| `seed` | INT | `0` | Seed for generating repeatable noise. |
+| `strength` | FLOAT | `1.0` | Noise strength relative to the latent std. |
+
+### Node Parameters: Image Noise
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `image` | IMAGE | – | Image to receive additional noise. |
+| `seed` | INT | `0` | Seed for generating repeatable noise. |
+| `strength` | FLOAT | `1.0` | Noise strength relative to the image std. |
 
 ## Latent Channel Stats Preview
 
