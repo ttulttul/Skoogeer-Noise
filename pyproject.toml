@@ -1,0 +1,12 @@
+[project]
+name = "comfyui-skoogeer-noise"
+description = "Noise and perturbation utility nodes for ComfyUI (mesh drag, latent channel stats preview)."
+dependencies = ["numpy>=2.0", "torch>=2.1"]
+version = "1.0.0"
+license = "LICENSE"
+classifiers = [
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Repository = ""
