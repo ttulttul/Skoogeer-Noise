@@ -162,6 +162,18 @@ def test_latent_frequency_split_zero_sigma_returns_zero_high_pass():
     assert torch.allclose(high["samples"], torch.zeros_like(constant))
 
 
+def test_latent_frequency_merge_reconstructs_original():
+    split_node = qnn.LatentFrequencySplit()
+    merge_node = qnn.LatentFrequencyMerge()
+    latent = make_flow_matching_latent()
+
+    low, high = split_node.split(latent, sigma=1.0)
+    (merged,) = merge_node.merge(low, high)
+
+    assert_flow_matching_shape(merged["samples"])
+    assert torch.allclose(merged["samples"], latent["samples"], atol=1e-5)
+
+
 def test_perlin_noise_strength_affects_latent():
     node = qnn.LatentPerlinFractalNoise()
     latent = make_flow_matching_latent()

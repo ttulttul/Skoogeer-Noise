@@ -61,6 +61,7 @@ ComfyUI conditioning is a list of `[embedding, metadata]` entries. The condition
 | `Latent Channel Stats Preview` | `latent/debug` | `IMAGE` |
 | `Latent Gaussian Blur` | `Latent/Filter` | `LATENT` |
 | `Latent Frequency Split` | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
+| `Latent Frequency Merge` | `Latent/Filter` | `LATENT` |
 | `Add Latent Noise (Seeded)` | `Latent/Noise` | `LATENT` |
 | `Add Image Noise (Seeded)` | `Image/Noise` | `IMAGE` |
 | `Latent Perlin Fractal Noise` | `Latent/Noise` | `LATENT` |
@@ -219,6 +220,26 @@ Splits a latent into **low-pass** and **high-pass** bands by subtracting a Gauss
 
 - `low_pass`: blurred latent
 - `high_pass`: `latent - low_pass` (zeros when `sigma <= 0`)
+
+---
+
+### Latent Frequency Merge
+
+Merges the **low-pass** and **high-pass** bands back into a single latent.
+
+- **Menu category:** `Latent/Filter`
+- **Returns:** `LATENT`
+
+#### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `low_pass` | `LATENT` | – | – | Low-frequency latent band produced by `Latent Frequency Split`. |
+| `high_pass` | `LATENT` | – | – | High-frequency latent band to merge back in. |
+
+#### Output
+
+- `merged`: `low_pass + high_pass`
 
 ---
 

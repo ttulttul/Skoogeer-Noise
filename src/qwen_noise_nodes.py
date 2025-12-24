@@ -971,6 +971,40 @@ class LatentFrequencySplit:
         return blurred
 
 
+class LatentFrequencyMerge:
+    """Recombines low/high latent bands back into a single latent."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "low_pass": ("LATENT", {"tooltip": "Low-frequency latent band produced by Latent Frequency Split."}),
+                "high_pass": ("LATENT", {"tooltip": "High-frequency latent band to merge back in."}),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "merge"
+    CATEGORY = "Latent/Filter"
+
+    def merge(self, low_pass, high_pass):
+        device = _get_device()
+        low_tensor = low_pass["samples"].clone().to(device)
+        high_tensor = high_pass["samples"].clone().to(device)
+
+        if low_tensor.shape != high_tensor.shape:
+            raise ValueError(
+                "Low-pass and high-pass latent shapes must match, got "
+                f"{tuple(low_tensor.shape)} vs {tuple(high_tensor.shape)}"
+            )
+
+        merged = low_tensor + high_tensor
+
+        out = low_pass.copy()
+        out["samples"] = merged.cpu()
+        return (out,)
+
+
 class LatentAddNoise:
     """
     Adds a configurable amount of seeded random noise to a latent tensor.
@@ -2418,6 +2452,7 @@ class ConditioningScale:
 NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     "LatentGaussianBlur": LatentGaussianBlur,
     "LatentFrequencySplit": LatentFrequencySplit,
+    "LatentFrequencyMerge": LatentFrequencyMerge,
     "LatentAddNoise": LatentAddNoise,
     "LatentPerlinFractalNoise": LatentPerlinFractalNoise,
     "LatentSimplexNoise": LatentSimplexNoise,
@@ -2443,6 +2478,7 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
 NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     "LatentGaussianBlur": "Latent Gaussian Blur",
     "LatentFrequencySplit": "Latent Frequency Split",
+    "LatentFrequencyMerge": "Latent Frequency Merge",
     "LatentAddNoise": "Add Latent Noise (Seeded)",
     "LatentPerlinFractalNoise": "Latent Perlin Fractal Noise",
     "LatentSimplexNoise": "Latent Simplex Noise",
@@ -2464,4 +2500,3 @@ NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     "ConditioningFrequencyMerge": "Conditioning (Frequency Merge)",
     "ConditioningScale": "Conditioning (Scale)",
 }
-
