@@ -236,10 +236,12 @@ Merges the **low-pass** and **high-pass** bands back into a single latent.
 |------|------|---------|--------------|------|
 | `low_pass` | `LATENT` | – | – | Low-frequency latent band produced by `Latent Frequency Split`. |
 | `high_pass` | `LATENT` | – | – | High-frequency latent band to merge back in. |
+| `low_gain` | `FLOAT` | `1.0` | `-5.0..5.0` | Multiplier for the low-pass band before merging. |
+| `high_gain` | `FLOAT` | `1.0` | `-5.0..5.0` | Multiplier for the high-pass band before merging. |
 
 #### Output
 
-- `merged`: `low_pass + high_pass`
+- `merged`: `low_pass * low_gain + high_pass * high_gain`
 
 ---
 

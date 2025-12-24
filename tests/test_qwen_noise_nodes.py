@@ -168,7 +168,7 @@ def test_latent_frequency_merge_reconstructs_original():
     latent = make_flow_matching_latent()
 
     low, high = split_node.split(latent, sigma=1.0)
-    (merged,) = merge_node.merge(low, high)
+    (merged,) = merge_node.merge(low, high, low_gain=1.0, high_gain=1.0)
 
     assert_flow_matching_shape(merged["samples"])
     assert torch.allclose(merged["samples"], latent["samples"], atol=1e-5)

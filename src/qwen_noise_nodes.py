@@ -980,6 +980,20 @@ class LatentFrequencyMerge:
             "required": {
                 "low_pass": ("LATENT", {"tooltip": "Low-frequency latent band produced by Latent Frequency Split."}),
                 "high_pass": ("LATENT", {"tooltip": "High-frequency latent band to merge back in."}),
+                "low_gain": ("FLOAT", {
+                    "default": 1.0,
+                    "min": -5.0,
+                    "max": 5.0,
+                    "step": 0.05,
+                    "tooltip": "Multiplier for the low-pass band before merging.",
+                }),
+                "high_gain": ("FLOAT", {
+                    "default": 1.0,
+                    "min": -5.0,
+                    "max": 5.0,
+                    "step": 0.05,
+                    "tooltip": "Multiplier for the high-pass band before merging.",
+                }),
             }
         }
 
@@ -987,7 +1001,7 @@ class LatentFrequencyMerge:
     FUNCTION = "merge"
     CATEGORY = "Latent/Filter"
 
-    def merge(self, low_pass, high_pass):
+    def merge(self, low_pass, high_pass, low_gain, high_gain):
         device = _get_device()
         low_tensor = low_pass["samples"].clone().to(device)
         high_tensor = high_pass["samples"].clone().to(device)
@@ -998,7 +1012,10 @@ class LatentFrequencyMerge:
                 f"{tuple(low_tensor.shape)} vs {tuple(high_tensor.shape)}"
             )
 
-        merged = low_tensor + high_tensor
+        if low_tensor.dtype != high_tensor.dtype:
+            high_tensor = high_tensor.to(dtype=low_tensor.dtype)
+
+        merged = low_tensor * float(low_gain) + high_tensor * float(high_gain)
 
         out = low_pass.copy()
         out["samples"] = merged.cpu()
