@@ -30,6 +30,10 @@ if __package__:
         NODE_CLASS_MAPPINGS as NOISE_NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS as NOISE_DISPLAY_NAME_MAPPINGS,
     )
+    from .src.qwen_noise_nodes import (  # type: ignore[attr-defined] # noqa: F401
+        NODE_CLASS_MAPPINGS as QWEN_NOISE_NODE_CLASS_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS as QWEN_NOISE_DISPLAY_NAME_MAPPINGS,
+    )
 else:  # pragma: no cover - direct execution fallback
     _ROOT_DIR = pathlib.Path(__file__).resolve().parent
     stats_module = _load_module_from_path(
@@ -37,6 +41,7 @@ else:  # pragma: no cover - direct execution fallback
     )
     drag_module = _load_module_from_path("latent_mesh_drag", _ROOT_DIR / "src" / "latent_mesh_drag.py")
     noise_module = _load_module_from_path("seeded_noise", _ROOT_DIR / "src" / "seeded_noise.py")
+    qwen_noise_module = _load_module_from_path("qwen_noise_nodes", _ROOT_DIR / "src" / "qwen_noise_nodes.py")
 
     STATS_NODE_CLASS_MAPPINGS = getattr(stats_module, "NODE_CLASS_MAPPINGS")
     STATS_DISPLAY_NAME_MAPPINGS = getattr(stats_module, "NODE_DISPLAY_NAME_MAPPINGS")
@@ -44,11 +49,19 @@ else:  # pragma: no cover - direct execution fallback
     DRAG_DISPLAY_NAME_MAPPINGS = getattr(drag_module, "NODE_DISPLAY_NAME_MAPPINGS")
     NOISE_NODE_CLASS_MAPPINGS = getattr(noise_module, "NODE_CLASS_MAPPINGS")
     NOISE_DISPLAY_NAME_MAPPINGS = getattr(noise_module, "NODE_DISPLAY_NAME_MAPPINGS")
+    QWEN_NOISE_NODE_CLASS_MAPPINGS = getattr(qwen_noise_module, "NODE_CLASS_MAPPINGS")
+    QWEN_NOISE_DISPLAY_NAME_MAPPINGS = getattr(qwen_noise_module, "NODE_DISPLAY_NAME_MAPPINGS")
 
-NODE_CLASS_MAPPINGS: Dict[str, Any] = {**DRAG_NODE_CLASS_MAPPINGS, **NOISE_NODE_CLASS_MAPPINGS, **STATS_NODE_CLASS_MAPPINGS}
+NODE_CLASS_MAPPINGS: Dict[str, Any] = {
+    **DRAG_NODE_CLASS_MAPPINGS,
+    **NOISE_NODE_CLASS_MAPPINGS,
+    **QWEN_NOISE_NODE_CLASS_MAPPINGS,
+    **STATS_NODE_CLASS_MAPPINGS,
+}
 NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     **DRAG_DISPLAY_NAME_MAPPINGS,
     **NOISE_DISPLAY_NAME_MAPPINGS,
+    **QWEN_NOISE_DISPLAY_NAME_MAPPINGS,
     **STATS_DISPLAY_NAME_MAPPINGS,
 }
 

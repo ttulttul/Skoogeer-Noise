@@ -6,6 +6,9 @@ mesh-drag spatial perturbation nodes.
 This pack was extracted from `ComfyUI-FlowMatching-Upscaler` so the perturbation
 and debug nodes can be installed independently.
 
+It also includes the latent/image/conditioning noise + filtering nodes that were
+previously shipped in `ComfyUI-QwenRectifiedFlowInverter`.
+
 ## Nodes
 
 - `Latent Mesh Drag` (`latent/perturb`)
@@ -13,6 +16,28 @@ and debug nodes can be installed independently.
 - `Latent Noise` (`latent/perturb`)
 - `Image Noise` (`image/perturb`)
 - `Latent Channel Stats Preview` (`latent/debug`)
+- `Latent Gaussian Blur` (`Latent/Filter`)
+- `Latent Frequency Split` (`Latent/Filter`)
+- `Add Latent Noise (Seeded)` (`Latent/Noise`)
+- `Add Image Noise (Seeded)` (`Image/Noise`)
+- `Latent Perlin Fractal Noise` (`Latent/Noise`)
+- `Image Perlin Fractal Noise` (`Image/Noise`)
+- `Latent Simplex Noise` (`Latent/Noise`)
+- `Image Simplex Noise` (`Image/Noise`)
+- `Latent Worley Noise` (`Latent/Noise`)
+- `Image Worley Noise` (`Image/Noise`)
+- `Latent Reaction-Diffusion` (`Latent/Noise`)
+- `Image Reaction-Diffusion` (`Image/Noise`)
+- `Latent Fractal Brownian Motion` (`Latent/Noise`)
+- `Image Fractal Brownian Motion` (`Image/Noise`)
+- `Latent Swirl Noise` (`Latent/Noise`)
+- `Image Swirl Noise` (`Image/Noise`)
+- `Forward Diffusion (Add Scheduled Noise)` (`Latent/Noise`)
+- `Conditioning (Add Noise)` (`conditioning/noise`)
+- `Conditioning (Gaussian Blur)` (`conditioning/filter`)
+- `Conditioning (Frequency Split)` (`conditioning/filter`)
+- `Conditioning (Frequency Merge)` (`conditioning/filter`)
+- `Conditioning (Scale)` (`conditioning/filter`)
 
 ## Installation
 
