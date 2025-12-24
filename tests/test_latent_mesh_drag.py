@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.latent_mesh_drag import (  # noqa: E402
     ImageMeshDrag,
     LatentMeshDrag,
+    _make_control_displacement,
     mesh_drag_warp,
     mesh_drag_warp_image,
 )
@@ -30,6 +31,44 @@ def test_mesh_drag_warp_deterministic_for_seed():
     out1 = mesh_drag_warp(tensor, points=12, drag_min=1.0, drag_max=4.0, seed=999)
     out2 = mesh_drag_warp(tensor, points=12, drag_min=1.0, drag_max=4.0, seed=999)
     assert torch.allclose(out1, out2)
+
+
+def test_mesh_drag_control_displacement_direction_up_enforced():
+    disp = _make_control_displacement(
+        grid_h=8,
+        grid_w=8,
+        points=12,
+        drag_min=1.0,
+        drag_max=3.0,
+        seed=123,
+        direction=0.0,
+    )
+
+    mask = disp.abs().sum(dim=0) > 0
+    dx = disp[0][mask]
+    dy = disp[1][mask]
+
+    assert torch.max(torch.abs(dx)).item() < 1e-5
+    assert torch.all(dy < 0)
+
+
+def test_mesh_drag_control_displacement_direction_right_enforced():
+    disp = _make_control_displacement(
+        grid_h=8,
+        grid_w=8,
+        points=12,
+        drag_min=1.0,
+        drag_max=3.0,
+        seed=123,
+        direction=90.0,
+    )
+
+    mask = disp.abs().sum(dim=0) > 0
+    dx = disp[0][mask]
+    dy = disp[1][mask]
+
+    assert torch.max(torch.abs(dy)).item() < 1e-5
+    assert torch.all(dx > 0)
 
 
 def test_mesh_drag_warp_supports_bspline_interpolation():

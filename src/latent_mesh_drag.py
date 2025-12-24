@@ -103,6 +103,7 @@ def _make_control_displacement(
     drag_min: float,
     drag_max: float,
     seed: int,
+    direction: float = -1.0,
 ) -> torch.Tensor:
     disp = torch.zeros((2, grid_h, grid_w), dtype=torch.float32)
     if points <= 0 or drag_max <= 0.0:
@@ -118,9 +119,15 @@ def _make_control_displacement(
     xs = (chosen % grid_w).to(torch.long)
 
     magnitudes = torch.empty((points,), dtype=torch.float32).uniform_(float(drag_min), float(drag_max), generator=generator)
-    angles = torch.empty((points,), dtype=torch.float32).uniform_(0.0, float(2.0 * math.pi), generator=generator)
-    dx = magnitudes * torch.cos(angles)
-    dy = magnitudes * torch.sin(angles)
+    direction = float(direction)
+    if direction >= 0.0:
+        angle = math.radians(direction % 360.0)
+        dx = magnitudes * float(math.sin(angle))
+        dy = magnitudes * float(-math.cos(angle))
+    else:
+        angles = torch.empty((points,), dtype=torch.float32).uniform_(0.0, float(2.0 * math.pi), generator=generator)
+        dx = magnitudes * torch.cos(angles)
+        dy = magnitudes * torch.sin(angles)
 
     disp[0, ys, xs] = dx
     disp[1, ys, xs] = dy
@@ -194,6 +201,7 @@ def mesh_drag_warp(
     drag_min: float,
     drag_max: float,
     seed: int,
+    direction: float = -1.0,
     padding_mode: str = "border",
     vertex_spacing: int = _DEFAULT_VERTEX_SPACING,
     displacement_interpolation: str = "bicubic",
@@ -241,6 +249,7 @@ def mesh_drag_warp(
                 drag_min=drag_min,
                 drag_max=drag_max,
                 seed=_seed_for_batch(seed, batch_index),
+                direction=direction,
             )
             for batch_index in range(flattened.batch_size)
         ],
@@ -288,6 +297,7 @@ def mesh_drag_warp_image(
     drag_min: float,
     drag_max: float,
     seed: int,
+    direction: float = -1.0,
     padding_mode: str = "border",
     vertex_spacing: int = _DEFAULT_IMAGE_VERTEX_SPACING,
     displacement_interpolation: str = "bicubic",
@@ -310,6 +320,7 @@ def mesh_drag_warp_image(
             drag_min=drag_min,
             drag_max=drag_max,
             seed=seed,
+            direction=direction,
             padding_mode=padding_mode,
             vertex_spacing=vertex_spacing,
             displacement_interpolation=displacement_interpolation,
@@ -329,6 +340,7 @@ def mesh_drag_warp_image(
             drag_min=drag_min,
             drag_max=drag_max,
             seed=seed,
+            direction=direction,
             padding_mode=padding_mode,
             vertex_spacing=vertex_spacing,
             displacement_interpolation=displacement_interpolation,
@@ -344,6 +356,7 @@ def mesh_drag_warp_image(
             drag_min=drag_min,
             drag_max=drag_max,
             seed=seed,
+            direction=direction,
             padding_mode=padding_mode,
             vertex_spacing=vertex_spacing,
             displacement_interpolation=displacement_interpolation,
@@ -404,6 +417,14 @@ class LatentMeshDrag:
                     "round": 0.01,
                     "tooltip": "Maximum drag distance (latent pixels).",
                 }),
+                "direction": ("FLOAT", {
+                    "default": -1.0,
+                    "min": -1.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "round": 1.0,
+                    "tooltip": "Drag direction in degrees (0=up, 90=right, 180=down, 270=left). Set to -1 to allow random directions.",
+                }),
             },
             "optional": {
                 "displacement_interpolation": (cls._DISPLACEMENT_INTERPOLATION_OPTIONS, {
@@ -431,6 +452,7 @@ class LatentMeshDrag:
         points: int,
         drag_min: float,
         drag_max: float,
+        direction: float = -1.0,
         displacement_interpolation: str = "bicubic",
         spline_passes: int = 2,
         sampling_interpolation: str = "bilinear",
@@ -460,6 +482,7 @@ class LatentMeshDrag:
             drag_min=float(drag_min),
             drag_max=float(drag_max),
             seed=int(seed),
+            direction=float(direction),
             displacement_interpolation=str(displacement_interpolation),
             spline_passes=int(spline_passes),
             sampling_interpolation=str(sampling_interpolation),
@@ -476,6 +499,7 @@ class LatentMeshDrag:
                 drag_min=float(drag_min),
                 drag_max=float(drag_max),
                 seed=int(seed),
+                direction=float(direction),
                 displacement_interpolation=str(displacement_interpolation),
                 spline_passes=int(spline_passes),
                 sampling_interpolation=str(sampling_interpolation),
@@ -531,6 +555,14 @@ class ImageMeshDrag:
                     "round": 0.01,
                     "tooltip": "Maximum drag distance (image pixels).",
                 }),
+                "direction": ("FLOAT", {
+                    "default": -1.0,
+                    "min": -1.0,
+                    "max": 360.0,
+                    "step": 1.0,
+                    "round": 1.0,
+                    "tooltip": "Drag direction in degrees (0=up, 90=right, 180=down, 270=left). Set to -1 to allow random directions.",
+                }),
             },
             "optional": {
                 "displacement_interpolation": (cls._DISPLACEMENT_INTERPOLATION_OPTIONS, {
@@ -558,6 +590,7 @@ class ImageMeshDrag:
         points: int,
         drag_min: float,
         drag_max: float,
+        direction: float = -1.0,
         displacement_interpolation: str = "bicubic",
         spline_passes: int = 2,
         sampling_interpolation: str = "bilinear",
@@ -583,6 +616,7 @@ class ImageMeshDrag:
             drag_min=float(drag_min),
             drag_max=float(drag_max),
             seed=int(seed),
+            direction=float(direction),
             displacement_interpolation=str(displacement_interpolation),
             spline_passes=int(spline_passes),
             sampling_interpolation=str(sampling_interpolation),

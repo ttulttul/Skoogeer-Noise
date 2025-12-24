@@ -101,6 +101,7 @@ Applies a cloth-like spatial warp to a `LATENT` by randomly dragging control ver
 | `points` | `INT` | `12` | `0..2048` | Number of mesh vertices to randomly drag. |
 | `drag_min` | `FLOAT` | `0.0` | `0.0..128.0` | Minimum drag distance (**latent pixels**). |
 | `drag_max` | `FLOAT` | `4.0` | `0.0..128.0` | Maximum drag distance (**latent pixels**). |
+| `direction` | `FLOAT` | `-1.0` | `-1.0..360.0` | Drag direction in degrees (`0`=up, `90`=right, `180`=down, `270`=left). `-1` allows random directions. |
 | `displacement_interpolation` | enum | `bicubic` | `bilinear/bicubic/bspline/nearest` | How to interpolate sparse mesh drags into a full displacement field (`bspline` is smoother). |
 | `spline_passes` | `INT` | `2` | `0..16` | Only used when `displacement_interpolation = bspline`. |
 | `sampling_interpolation` | enum | `bilinear` | `bilinear/bicubic/nearest` | How to sample the source tensor when applying the warp. |
@@ -128,6 +129,7 @@ Applies the same mesh-drag deformation in image space (pixel units) to ComfyUI `
 | `points` | `INT` | `12` | `0..4096` | Number of mesh vertices to randomly drag. |
 | `drag_min` | `FLOAT` | `0.0` | `0.0..4096.0` | Minimum drag distance (**image pixels**). |
 | `drag_max` | `FLOAT` | `32.0` | `0.0..4096.0` | Maximum drag distance (**image pixels**). |
+| `direction` | `FLOAT` | `-1.0` | `-1.0..360.0` | Drag direction in degrees (`0`=up, `90`=right, `180`=down, `270`=left). `-1` allows random directions. |
 | `displacement_interpolation` | enum | `bicubic` | `bilinear/bicubic/bspline/nearest` | How to interpolate sparse mesh drags into a full displacement field (`bspline` is smoother). |
 | `spline_passes` | `INT` | `2` | `0..16` | Only used when `displacement_interpolation = bspline`. |
 | `sampling_interpolation` | enum | `bilinear` | `bilinear/bicubic/nearest` | How to sample the source image when applying the warp. |
