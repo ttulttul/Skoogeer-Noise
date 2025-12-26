@@ -11,6 +11,7 @@ from src.latent_mesh_drag import (  # noqa: E402
     ImageMeshDrag,
     LatentMeshDrag,
     _make_control_displacement,
+    _effective_vertex_spacing_for_stroke,
     mesh_drag_warp,
     mesh_drag_warp_image,
 )
@@ -31,6 +32,12 @@ def test_mesh_drag_warp_deterministic_for_seed():
     out1 = mesh_drag_warp(tensor, points=12, drag_min=1.0, drag_max=4.0, seed=999)
     out2 = mesh_drag_warp(tensor, points=12, drag_min=1.0, drag_max=4.0, seed=999)
     assert torch.allclose(out1, out2)
+
+
+def test_effective_vertex_spacing_tightens_for_narrow_stroke():
+    spacing = _effective_vertex_spacing_for_stroke(16, stroke_width=6.0, height=64, width=64)
+    assert spacing < 16
+    assert spacing <= 3
 
 
 def test_mesh_drag_control_displacement_direction_up_enforced():

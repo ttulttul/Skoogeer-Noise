@@ -14,6 +14,7 @@ _SEED_STRIDE = 0x9E3779B97F4A7C15  # 64-bit golden ratio constant
 _STROKE_SEED_OFFSET = 0xD1B54A32D192ED03  # Separate stream for stroke params.
 _DEFAULT_VERTEX_SPACING = 16  # Latent pixels between control vertices.
 _DEFAULT_IMAGE_VERTEX_SPACING = _DEFAULT_VERTEX_SPACING * 8  # Approx SD-style VAE scale factor.
+_MAX_STROKE_CONTROL_GRID = 256  # Clamp control grid size when stroke_width is small.
 _DISPLACEMENT_INTERPOLATION_MODES = ("bilinear", "bicubic", "bspline", "nearest")
 _SAMPLING_INTERPOLATION_MODES = ("bilinear", "bicubic", "nearest")
 
@@ -98,6 +99,39 @@ def _seed_for_batch(seed: int, batch_index: int) -> int:
 
 def _seed_for_stroke(seed: int) -> int:
     return (int(seed) + _STROKE_SEED_OFFSET) & 0xFFFFFFFFFFFFFFFF
+
+
+def _effective_vertex_spacing_for_stroke(
+    vertex_spacing: int,
+    *,
+    stroke_width: float,
+    height: int,
+    width: int,
+) -> int:
+    """
+    Adaptive mesh density for brush-stroke mode.
+
+    When `stroke_width` is small relative to the default mesh spacing, the eligible control
+    vertices can collapse to a single row/column, producing a 1D-looking stroke. This helper
+    tightens the mesh spacing so there are multiple control vertices across the stroke width,
+    while clamping the maximum grid resolution for safety.
+    """
+    vertex_spacing = max(1, int(vertex_spacing))
+    stroke_width = float(stroke_width)
+
+    if stroke_width <= 0.0:
+        return vertex_spacing
+
+    target_spacing = max(1, int(max(stroke_width, 1.0) / 2.0))
+    vertex_spacing = min(vertex_spacing, target_spacing)
+
+    max_grid = int(_MAX_STROKE_CONTROL_GRID)
+    if max_grid > 2:
+        min_spacing_h = 1 if height <= 1 else int(math.ceil((int(height) - 1) / float(max_grid - 1)))
+        min_spacing_w = 1 if width <= 1 else int(math.ceil((int(width) - 1) / float(max_grid - 1)))
+        vertex_spacing = max(vertex_spacing, min_spacing_h, min_spacing_w)
+
+    return vertex_spacing
 
 
 def _stroke_params(*, seed: int, direction: float, height: int, width: int) -> Tuple[float, float, float, float]:
@@ -341,8 +375,12 @@ def mesh_drag_warp(
     nchw = flattened.tensor
     device = nchw.device
 
-    grid_h, grid_w = _compute_vertex_grid_size(height, width, points, spacing=int(vertex_spacing))
     stroke_width = float(stroke_width)
+    spacing = int(vertex_spacing)
+    if stroke_width > 0.0:
+        spacing = _effective_vertex_spacing_for_stroke(spacing, stroke_width=stroke_width, height=height, width=width)
+
+    grid_h, grid_w = _compute_vertex_grid_size(height, width, points, spacing=spacing)
     stroke_params = None
     if stroke_width > 0.0:
         stroke_params = [
