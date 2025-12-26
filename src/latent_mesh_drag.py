@@ -11,6 +11,7 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 _SEED_STRIDE = 0x9E3779B97F4A7C15  # 64-bit golden ratio constant
+_STROKE_SEED_OFFSET = 0xD1B54A32D192ED03  # Separate stream for stroke params.
 _DEFAULT_VERTEX_SPACING = 16  # Latent pixels between control vertices.
 _DEFAULT_IMAGE_VERTEX_SPACING = _DEFAULT_VERTEX_SPACING * 8  # Approx SD-style VAE scale factor.
 _DISPLACEMENT_INTERPOLATION_MODES = ("bilinear", "bicubic", "bspline", "nearest")
@@ -95,6 +96,76 @@ def _seed_for_batch(seed: int, batch_index: int) -> int:
     return (int(seed) + int(batch_index) * _SEED_STRIDE) & 0xFFFFFFFFFFFFFFFF
 
 
+def _seed_for_stroke(seed: int) -> int:
+    return (int(seed) + _STROKE_SEED_OFFSET) & 0xFFFFFFFFFFFFFFFF
+
+
+def _stroke_params(*, seed: int, direction: float, height: int, width: int) -> Tuple[float, float, float, float]:
+    """
+    Returns (center_x, center_y, dir_x, dir_y) in pixel coordinates.
+
+    Direction uses degrees with 0=up, 90=right, 180=down, 270=left.
+    """
+    generator = torch.Generator(device="cpu").manual_seed(int(seed) & 0xFFFFFFFFFFFFFFFF)
+
+    width = int(width)
+    height = int(height)
+    if width <= 1:
+        center_x = 0.0
+    else:
+        center_x = float(
+            torch.empty((), dtype=torch.float64).uniform_(0.0, float(width - 1), generator=generator).item()
+        )
+    if height <= 1:
+        center_y = 0.0
+    else:
+        center_y = float(
+            torch.empty((), dtype=torch.float64).uniform_(0.0, float(height - 1), generator=generator).item()
+        )
+
+    direction = float(direction)
+    if direction >= 0.0:
+        angle = math.radians(direction % 360.0)
+    else:
+        angle = float(torch.empty((), dtype=torch.float64).uniform_(0.0, float(2.0 * math.pi), generator=generator).item())
+
+    dir_x = float(math.sin(angle))
+    dir_y = float(-math.cos(angle))
+    return center_x, center_y, dir_x, dir_y
+
+
+def _stroke_mask(
+    *,
+    height: int,
+    width: int,
+    center_x: float,
+    center_y: float,
+    dir_x: float,
+    dir_y: float,
+    stroke_width: float,
+    device: torch.device,
+) -> torch.Tensor:
+    """
+    Returns a (1,1,H,W) mask that is 1 on the stroke center line and falls to 0 at +/- stroke_width/2.
+    """
+    height = int(height)
+    width = int(width)
+    stroke_width = float(stroke_width)
+    half_width = max(stroke_width * 0.5, 1e-6)
+
+    ys = torch.arange(height, device=device, dtype=torch.float32).view(height, 1)
+    xs = torch.arange(width, device=device, dtype=torch.float32).view(1, width)
+
+    dx = xs - float(center_x)
+    dy = ys - float(center_y)
+    dist = torch.abs(dx * float(dir_y) - dy * float(dir_x))
+
+    t = (half_width - dist) / half_width
+    t = torch.clamp(t, 0.0, 1.0)
+    mask = t * t * (3.0 - 2.0 * t)
+    return mask.unsqueeze(0).unsqueeze(0)
+
+
 def _make_control_displacement(
     *,
     grid_h: int,
@@ -104,6 +175,10 @@ def _make_control_displacement(
     drag_max: float,
     seed: int,
     direction: float = -1.0,
+    stroke_width: float = -1.0,
+    stroke_params: Tuple[float, float, float, float] | None = None,
+    height: int | None = None,
+    width: int | None = None,
 ) -> torch.Tensor:
     disp = torch.zeros((2, grid_h, grid_w), dtype=torch.float32)
     if points <= 0 or drag_max <= 0.0:
@@ -114,7 +189,33 @@ def _make_control_displacement(
         raise ValueError(f"Requested {points} mesh points but only {total_vertices} vertices available.")
 
     generator = torch.Generator(device="cpu").manual_seed(int(seed))
-    chosen = torch.randperm(total_vertices, generator=generator)[:points]
+
+    stroke_width = float(stroke_width)
+    if stroke_width > 0.0 and stroke_params is not None and height is not None and width is not None:
+        center_x, center_y, dir_x, dir_y = stroke_params
+        vertex_indices = torch.arange(total_vertices, dtype=torch.long)
+        ys_all = (vertex_indices // grid_w).to(torch.float32)
+        xs_all = (vertex_indices % grid_w).to(torch.float32)
+
+        if grid_w > 1 and width > 1:
+            x_coords = xs_all / float(grid_w - 1) * float(width - 1)
+        else:
+            x_coords = torch.zeros_like(xs_all)
+        if grid_h > 1 and height > 1:
+            y_coords = ys_all / float(grid_h - 1) * float(height - 1)
+        else:
+            y_coords = torch.zeros_like(ys_all)
+
+        dist = torch.abs((x_coords - float(center_x)) * float(dir_y) - (y_coords - float(center_y)) * float(dir_x))
+        half_width = stroke_width * 0.5
+        eligible = torch.nonzero(dist <= half_width, as_tuple=False).flatten()
+        if eligible.numel() < points:
+            eligible = dist.argsort()[:points]
+
+        perm = torch.randperm(int(eligible.numel()), generator=generator)
+        chosen = eligible[perm[:points]]
+    else:
+        chosen = torch.randperm(total_vertices, generator=generator)[:points]
     ys = (chosen // grid_w).to(torch.long)
     xs = (chosen % grid_w).to(torch.long)
 
@@ -202,6 +303,7 @@ def mesh_drag_warp(
     drag_max: float,
     seed: int,
     direction: float = -1.0,
+    stroke_width: float = -1.0,
     padding_mode: str = "border",
     vertex_spacing: int = _DEFAULT_VERTEX_SPACING,
     displacement_interpolation: str = "bicubic",
@@ -240,6 +342,18 @@ def mesh_drag_warp(
     device = nchw.device
 
     grid_h, grid_w = _compute_vertex_grid_size(height, width, points, spacing=int(vertex_spacing))
+    stroke_width = float(stroke_width)
+    stroke_params = None
+    if stroke_width > 0.0:
+        stroke_params = [
+            _stroke_params(
+                seed=_seed_for_stroke(_seed_for_batch(seed, batch_index)),
+                direction=direction,
+                height=height,
+                width=width,
+            )
+            for batch_index in range(flattened.batch_size)
+        ]
     control = torch.stack(
         [
             _make_control_displacement(
@@ -250,6 +364,10 @@ def mesh_drag_warp(
                 drag_max=drag_max,
                 seed=_seed_for_batch(seed, batch_index),
                 direction=direction,
+                stroke_width=stroke_width,
+                stroke_params=stroke_params[batch_index] if stroke_params is not None else None,
+                height=height,
+                width=width,
             )
             for batch_index in range(flattened.batch_size)
         ],
@@ -264,6 +382,24 @@ def mesh_drag_warp(
             mode=displacement_interpolation,
             spline_passes=int(spline_passes),
         )
+        if stroke_params is not None:
+            masks = torch.cat(
+                [
+                    _stroke_mask(
+                        height=height,
+                        width=width,
+                        center_x=params[0],
+                        center_y=params[1],
+                        dir_x=params[2],
+                        dir_y=params[3],
+                        stroke_width=stroke_width,
+                        device=device,
+                    )
+                    for params in stroke_params
+                ],
+                dim=0,
+            )
+            disp = disp * masks
         if drag_max > 0.0:
             disp = disp.clamp(min=-float(drag_max), max=float(drag_max))
 
@@ -298,6 +434,7 @@ def mesh_drag_warp_image(
     drag_max: float,
     seed: int,
     direction: float = -1.0,
+    stroke_width: float = -1.0,
     padding_mode: str = "border",
     vertex_spacing: int = _DEFAULT_IMAGE_VERTEX_SPACING,
     displacement_interpolation: str = "bicubic",
@@ -321,6 +458,7 @@ def mesh_drag_warp_image(
             drag_max=drag_max,
             seed=seed,
             direction=direction,
+            stroke_width=stroke_width,
             padding_mode=padding_mode,
             vertex_spacing=vertex_spacing,
             displacement_interpolation=displacement_interpolation,
@@ -341,6 +479,7 @@ def mesh_drag_warp_image(
             drag_max=drag_max,
             seed=seed,
             direction=direction,
+            stroke_width=stroke_width,
             padding_mode=padding_mode,
             vertex_spacing=vertex_spacing,
             displacement_interpolation=displacement_interpolation,
@@ -357,6 +496,7 @@ def mesh_drag_warp_image(
             drag_max=drag_max,
             seed=seed,
             direction=direction,
+            stroke_width=stroke_width,
             padding_mode=padding_mode,
             vertex_spacing=vertex_spacing,
             displacement_interpolation=displacement_interpolation,
@@ -425,6 +565,15 @@ class LatentMeshDrag:
                     "round": 1.0,
                     "tooltip": "Drag direction in degrees (0=up, 90=right, 180=down, 270=left). Set to -1 to allow random directions.",
                 }),
+                "stroke_width": ("FLOAT", {
+                    "default": -1.0,
+                    "min": -1.0,
+                    "max": 4096.0,
+                    "step": 1.0,
+                    "round": 0.1,
+                    "tooltip": "When >0, limits the warp to a narrow strip aligned with the direction (like a brush stroke). "
+                               "Units are latent pixels. Set to -1 to disable.",
+                }),
             },
             "optional": {
                 "displacement_interpolation": (cls._DISPLACEMENT_INTERPOLATION_OPTIONS, {
@@ -453,6 +602,7 @@ class LatentMeshDrag:
         drag_min: float,
         drag_max: float,
         direction: float = -1.0,
+        stroke_width: float = -1.0,
         displacement_interpolation: str = "bicubic",
         spline_passes: int = 2,
         sampling_interpolation: str = "bilinear",
@@ -483,6 +633,7 @@ class LatentMeshDrag:
             drag_max=float(drag_max),
             seed=int(seed),
             direction=float(direction),
+            stroke_width=float(stroke_width),
             displacement_interpolation=str(displacement_interpolation),
             spline_passes=int(spline_passes),
             sampling_interpolation=str(sampling_interpolation),
@@ -500,6 +651,7 @@ class LatentMeshDrag:
                 drag_max=float(drag_max),
                 seed=int(seed),
                 direction=float(direction),
+                stroke_width=float(stroke_width),
                 displacement_interpolation=str(displacement_interpolation),
                 spline_passes=int(spline_passes),
                 sampling_interpolation=str(sampling_interpolation),
@@ -563,6 +715,15 @@ class ImageMeshDrag:
                     "round": 1.0,
                     "tooltip": "Drag direction in degrees (0=up, 90=right, 180=down, 270=left). Set to -1 to allow random directions.",
                 }),
+                "stroke_width": ("FLOAT", {
+                    "default": -1.0,
+                    "min": -1.0,
+                    "max": 16384.0,
+                    "step": 1.0,
+                    "round": 0.1,
+                    "tooltip": "When >0, limits the warp to a narrow strip aligned with the direction (like a brush stroke). "
+                               "Units are image pixels. Set to -1 to disable.",
+                }),
             },
             "optional": {
                 "displacement_interpolation": (cls._DISPLACEMENT_INTERPOLATION_OPTIONS, {
@@ -591,6 +752,7 @@ class ImageMeshDrag:
         drag_min: float,
         drag_max: float,
         direction: float = -1.0,
+        stroke_width: float = -1.0,
         displacement_interpolation: str = "bicubic",
         spline_passes: int = 2,
         sampling_interpolation: str = "bilinear",
@@ -617,6 +779,7 @@ class ImageMeshDrag:
             drag_max=float(drag_max),
             seed=int(seed),
             direction=float(direction),
+            stroke_width=float(stroke_width),
             displacement_interpolation=str(displacement_interpolation),
             spline_passes=int(spline_passes),
             sampling_interpolation=str(sampling_interpolation),

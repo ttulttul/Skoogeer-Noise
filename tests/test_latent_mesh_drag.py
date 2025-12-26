@@ -71,6 +71,39 @@ def test_mesh_drag_control_displacement_direction_right_enforced():
     assert torch.all(dx > 0)
 
 
+def test_mesh_drag_warp_stroke_width_narrows_affected_area():
+    base = torch.arange(0, 64 * 64, dtype=torch.float32).reshape(1, 1, 64, 64)
+    tensor = base.repeat(1, 4, 1, 1)
+
+    out_narrow = mesh_drag_warp(
+        tensor,
+        points=64,
+        drag_min=1.0,
+        drag_max=6.0,
+        seed=42,
+        direction=90.0,
+        stroke_width=6.0,
+    )
+    out_wide = mesh_drag_warp(
+        tensor,
+        points=64,
+        drag_min=1.0,
+        drag_max=6.0,
+        seed=42,
+        direction=90.0,
+        stroke_width=30.0,
+    )
+
+    changed_narrow = (out_narrow - tensor).abs().amax(dim=1) > 1e-6
+    changed_wide = (out_wide - tensor).abs().amax(dim=1) > 1e-6
+
+    count_narrow = int(changed_narrow.sum().item())
+    count_wide = int(changed_wide.sum().item())
+
+    assert count_narrow > 0
+    assert count_wide > count_narrow
+
+
 def test_mesh_drag_warp_supports_bspline_interpolation():
     base = torch.linspace(0.0, 1.0, 48 * 48, dtype=torch.float32).reshape(1, 1, 48, 48)
     tensor = base.repeat(1, 4, 1, 1)
