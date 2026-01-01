@@ -375,6 +375,14 @@ def mesh_drag_warp(
                     y0 = torch.zeros_like(ys)
 
                 if direction >= 0.0:
+                    step_x = float(width - 1) / float(max(grid_w - 1, 1))
+                    step_y = float(height - 1) / float(max(grid_h - 1, 1))
+                    jitter_seed = (_seed_for_batch(seed, batch_index) ^ 0xD1B54A32D192ED03) & 0xFFFFFFFFFFFFFFFF
+                    jitter_generator = torch.Generator(device="cpu").manual_seed(int(jitter_seed))
+                    jitter_x = (torch.rand((x0.numel(),), generator=jitter_generator, dtype=torch.float32) - 0.5) * step_x
+                    jitter_y = (torch.rand((y0.numel(),), generator=jitter_generator, dtype=torch.float32) - 0.5) * step_y
+                    x0 = torch.clamp(x0 + jitter_x.to(device=device), 0.0, float(width - 1))
+                    y0 = torch.clamp(y0 + jitter_y.to(device=device), 0.0, float(height - 1))
                     dir_x = torch.full_like(x0, global_dir_x, dtype=torch.float32, device=device)
                     dir_y = torch.full_like(y0, global_dir_y, dtype=torch.float32, device=device)
                 else:
@@ -571,7 +579,8 @@ class LatentMeshDrag:
                     "max": 4096.0,
                     "step": 1.0,
                     "round": 0.1,
-                    "tooltip": "When >0, limits the warp to narrow brush-stroke channels aligned with the direction (one per dragged mesh point). "
+                    "tooltip": "When >0, limits the warp to narrow brush-stroke channels aligned with the direction (one per dragged mesh point; "
+                               "stroke centers are jittered when direction is fixed). "
                                "Units are latent pixels. Set to -1 to disable.",
                 }),
             },
@@ -721,7 +730,8 @@ class ImageMeshDrag:
                     "max": 16384.0,
                     "step": 1.0,
                     "round": 0.1,
-                    "tooltip": "When >0, limits the warp to narrow brush-stroke channels aligned with the direction (one per dragged mesh point). "
+                    "tooltip": "When >0, limits the warp to narrow brush-stroke channels aligned with the direction (one per dragged mesh point; "
+                               "stroke centers are jittered when direction is fixed). "
                                "Units are image pixels. Set to -1 to disable.",
                 }),
             },

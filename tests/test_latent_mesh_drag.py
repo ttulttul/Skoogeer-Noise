@@ -33,6 +33,29 @@ def test_mesh_drag_warp_deterministic_for_seed():
     assert torch.allclose(out1, out2)
 
 
+def test_mesh_drag_warp_deterministic_for_seed_with_brush_strokes():
+    tensor = torch.randn(1, 4, 32, 32)
+    out1 = mesh_drag_warp(
+        tensor,
+        points=12,
+        drag_min=1.0,
+        drag_max=4.0,
+        seed=999,
+        direction=90.0,
+        stroke_width=8.0,
+    )
+    out2 = mesh_drag_warp(
+        tensor,
+        points=12,
+        drag_min=1.0,
+        drag_max=4.0,
+        seed=999,
+        direction=90.0,
+        stroke_width=8.0,
+    )
+    assert torch.allclose(out1, out2)
+
+
 def test_mesh_drag_control_displacement_direction_up_enforced():
     disp = _make_control_displacement(
         grid_h=8,
