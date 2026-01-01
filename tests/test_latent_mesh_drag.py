@@ -11,7 +11,6 @@ from src.latent_mesh_drag import (  # noqa: E402
     ImageMeshDrag,
     LatentMeshDrag,
     _make_control_displacement,
-    _effective_vertex_spacing_for_stroke,
     mesh_drag_warp,
     mesh_drag_warp_image,
 )
@@ -32,12 +31,6 @@ def test_mesh_drag_warp_deterministic_for_seed():
     out1 = mesh_drag_warp(tensor, points=12, drag_min=1.0, drag_max=4.0, seed=999)
     out2 = mesh_drag_warp(tensor, points=12, drag_min=1.0, drag_max=4.0, seed=999)
     assert torch.allclose(out1, out2)
-
-
-def test_effective_vertex_spacing_tightens_for_narrow_stroke():
-    spacing = _effective_vertex_spacing_for_stroke(16, stroke_width=6.0, height=64, width=64)
-    assert spacing < 16
-    assert spacing <= 3
 
 
 def test_mesh_drag_control_displacement_direction_up_enforced():
@@ -109,6 +102,39 @@ def test_mesh_drag_warp_stroke_width_narrows_affected_area():
 
     assert count_narrow > 0
     assert count_wide > count_narrow
+
+
+def test_mesh_drag_warp_stroke_width_scales_with_point_count():
+    base = torch.arange(0, 64 * 64, dtype=torch.float32).reshape(1, 1, 64, 64)
+    tensor = base.repeat(1, 4, 1, 1)
+
+    out_single = mesh_drag_warp(
+        tensor,
+        points=1,
+        drag_min=1.0,
+        drag_max=6.0,
+        seed=42,
+        direction=90.0,
+        stroke_width=6.0,
+    )
+    out_many = mesh_drag_warp(
+        tensor,
+        points=24,
+        drag_min=1.0,
+        drag_max=6.0,
+        seed=42,
+        direction=90.0,
+        stroke_width=6.0,
+    )
+
+    changed_single = (out_single - tensor).abs().amax(dim=1) > 1e-6
+    changed_many = (out_many - tensor).abs().amax(dim=1) > 1e-6
+
+    rows_single = int(changed_single[0].any(dim=1).sum().item())
+    rows_many = int(changed_many[0].any(dim=1).sum().item())
+
+    assert rows_single > 0
+    assert rows_many > rows_single
 
 
 def test_mesh_drag_warp_supports_bspline_interpolation():

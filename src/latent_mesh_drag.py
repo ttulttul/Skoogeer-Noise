@@ -11,10 +11,8 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 _SEED_STRIDE = 0x9E3779B97F4A7C15  # 64-bit golden ratio constant
-_STROKE_SEED_OFFSET = 0xD1B54A32D192ED03  # Separate stream for stroke params.
 _DEFAULT_VERTEX_SPACING = 16  # Latent pixels between control vertices.
 _DEFAULT_IMAGE_VERTEX_SPACING = _DEFAULT_VERTEX_SPACING * 8  # Approx SD-style VAE scale factor.
-_MAX_STROKE_CONTROL_GRID = 256  # Clamp control grid size when stroke_width is small.
 _DISPLACEMENT_INTERPOLATION_MODES = ("bilinear", "bicubic", "bspline", "nearest")
 _SAMPLING_INTERPOLATION_MODES = ("bilinear", "bicubic", "nearest")
 
@@ -97,107 +95,79 @@ def _seed_for_batch(seed: int, batch_index: int) -> int:
     return (int(seed) + int(batch_index) * _SEED_STRIDE) & 0xFFFFFFFFFFFFFFFF
 
 
-def _seed_for_stroke(seed: int) -> int:
-    return (int(seed) + _STROKE_SEED_OFFSET) & 0xFFFFFFFFFFFFFFFF
+def _smoothstep(value: torch.Tensor) -> torch.Tensor:
+    value = torch.clamp(value, 0.0, 1.0)
+    return value * value * (3.0 - 2.0 * value)
 
 
-def _effective_vertex_spacing_for_stroke(
-    vertex_spacing: int,
-    *,
-    stroke_width: float,
-    height: int,
-    width: int,
-) -> int:
-    """
-    Adaptive mesh density for brush-stroke mode.
-
-    When `stroke_width` is small relative to the default mesh spacing, the eligible control
-    vertices can collapse to a single row/column, producing a 1D-looking stroke. This helper
-    tightens the mesh spacing so there are multiple control vertices across the stroke width,
-    while clamping the maximum grid resolution for safety.
-    """
-    vertex_spacing = max(1, int(vertex_spacing))
-    stroke_width = float(stroke_width)
-
-    if stroke_width <= 0.0:
-        return vertex_spacing
-
-    target_spacing = max(1, int(max(stroke_width, 1.0) / 2.0))
-    vertex_spacing = min(vertex_spacing, target_spacing)
-
-    max_grid = int(_MAX_STROKE_CONTROL_GRID)
-    if max_grid > 2:
-        min_spacing_h = 1 if height <= 1 else int(math.ceil((int(height) - 1) / float(max_grid - 1)))
-        min_spacing_w = 1 if width <= 1 else int(math.ceil((int(width) - 1) / float(max_grid - 1)))
-        vertex_spacing = max(vertex_spacing, min_spacing_h, min_spacing_w)
-
-    return vertex_spacing
-
-
-def _stroke_params(*, seed: int, direction: float, height: int, width: int) -> Tuple[float, float, float, float]:
-    """
-    Returns (center_x, center_y, dir_x, dir_y) in pixel coordinates.
-
-    Direction uses degrees with 0=up, 90=right, 180=down, 270=left.
-    """
-    generator = torch.Generator(device="cpu").manual_seed(int(seed) & 0xFFFFFFFFFFFFFFFF)
-
-    width = int(width)
-    height = int(height)
-    if width <= 1:
-        center_x = 0.0
-    else:
-        center_x = float(
-            torch.empty((), dtype=torch.float64).uniform_(0.0, float(width - 1), generator=generator).item()
-        )
-    if height <= 1:
-        center_y = 0.0
-    else:
-        center_y = float(
-            torch.empty((), dtype=torch.float64).uniform_(0.0, float(height - 1), generator=generator).item()
-        )
-
-    direction = float(direction)
-    if direction >= 0.0:
-        angle = math.radians(direction % 360.0)
-    else:
-        angle = float(torch.empty((), dtype=torch.float64).uniform_(0.0, float(2.0 * math.pi), generator=generator).item())
-
-    dir_x = float(math.sin(angle))
-    dir_y = float(-math.cos(angle))
-    return center_x, center_y, dir_x, dir_y
-
-
-def _stroke_mask(
+def _brush_stroke_mask(
     *,
     height: int,
     width: int,
-    center_x: float,
-    center_y: float,
-    dir_x: float,
-    dir_y: float,
+    x0: torch.Tensor,
+    y0: torch.Tensor,
+    dir_x: torch.Tensor,
+    dir_y: torch.Tensor,
     stroke_width: float,
+    stroke_length: float,
     device: torch.device,
+    max_points_per_chunk: int = 256,
 ) -> torch.Tensor:
     """
-    Returns a (1,1,H,W) mask that is 1 on the stroke center line and falls to 0 at +/- stroke_width/2.
+    Builds a (1,1,H,W) mask from many *finite* brush strokes.
+
+    Each stroke is a soft strip centered at (x0,y0), oriented by (dir_x,dir_y), with:
+    - width = `stroke_width` (across the strip)
+    - length = `stroke_length` (forward from the point along the direction)
     """
     height = int(height)
     width = int(width)
     stroke_width = float(stroke_width)
+    stroke_length = float(stroke_length)
+
+    if x0.numel() == 0 or stroke_width <= 0.0 or stroke_length <= 0.0:
+        return torch.zeros((1, 1, height, width), device=device, dtype=torch.float32)
+
+    x0 = x0.to(device=device, dtype=torch.float32)
+    y0 = y0.to(device=device, dtype=torch.float32)
+    dir_x = dir_x.to(device=device, dtype=torch.float32)
+    dir_y = dir_y.to(device=device, dtype=torch.float32)
+
     half_width = max(stroke_width * 0.5, 1e-6)
+    edge = max(1.0, half_width)
+    stroke_length = max(stroke_length, edge)
 
-    ys = torch.arange(height, device=device, dtype=torch.float32).view(height, 1)
-    xs = torch.arange(width, device=device, dtype=torch.float32).view(1, width)
+    ys = torch.arange(height, device=device, dtype=torch.float32).view(1, height, 1)
+    xs = torch.arange(width, device=device, dtype=torch.float32).view(1, 1, width)
 
-    dx = xs - float(center_x)
-    dy = ys - float(center_y)
-    dist = torch.abs(dx * float(dir_y) - dy * float(dir_x))
+    combined = torch.zeros((height, width), device=device, dtype=torch.float32)
+    max_points_per_chunk = max(1, int(max_points_per_chunk))
 
-    t = (half_width - dist) / half_width
-    t = torch.clamp(t, 0.0, 1.0)
-    mask = t * t * (3.0 - 2.0 * t)
-    return mask.unsqueeze(0).unsqueeze(0)
+    total_points = int(x0.numel())
+    for start in range(0, total_points, max_points_per_chunk):
+        end = min(total_points, start + max_points_per_chunk)
+        x0_chunk = x0[start:end].view(-1, 1, 1)
+        y0_chunk = y0[start:end].view(-1, 1, 1)
+        dx_chunk = dir_x[start:end].view(-1, 1, 1)
+        dy_chunk = dir_y[start:end].view(-1, 1, 1)
+
+        dx = xs - x0_chunk
+        dy = ys - y0_chunk
+
+        u = dx * dx_chunk + dy * dy_chunk
+        v = dx * dy_chunk - dy * dx_chunk
+
+        v_norm = (half_width - torch.abs(v)) / half_width
+        w_v = _smoothstep(v_norm)
+
+        start_ramp = _smoothstep(u / edge)
+        end_ramp = _smoothstep((stroke_length - u) / edge)
+        w_u = start_ramp * end_ramp
+
+        stroke = (w_v * w_u).amax(dim=0)
+        combined = torch.maximum(combined, stroke)
+
+    return combined.unsqueeze(0).unsqueeze(0)
 
 
 def _make_control_displacement(
@@ -209,10 +179,6 @@ def _make_control_displacement(
     drag_max: float,
     seed: int,
     direction: float = -1.0,
-    stroke_width: float = -1.0,
-    stroke_params: Tuple[float, float, float, float] | None = None,
-    height: int | None = None,
-    width: int | None = None,
 ) -> torch.Tensor:
     disp = torch.zeros((2, grid_h, grid_w), dtype=torch.float32)
     if points <= 0 or drag_max <= 0.0:
@@ -223,33 +189,7 @@ def _make_control_displacement(
         raise ValueError(f"Requested {points} mesh points but only {total_vertices} vertices available.")
 
     generator = torch.Generator(device="cpu").manual_seed(int(seed))
-
-    stroke_width = float(stroke_width)
-    if stroke_width > 0.0 and stroke_params is not None and height is not None and width is not None:
-        center_x, center_y, dir_x, dir_y = stroke_params
-        vertex_indices = torch.arange(total_vertices, dtype=torch.long)
-        ys_all = (vertex_indices // grid_w).to(torch.float32)
-        xs_all = (vertex_indices % grid_w).to(torch.float32)
-
-        if grid_w > 1 and width > 1:
-            x_coords = xs_all / float(grid_w - 1) * float(width - 1)
-        else:
-            x_coords = torch.zeros_like(xs_all)
-        if grid_h > 1 and height > 1:
-            y_coords = ys_all / float(grid_h - 1) * float(height - 1)
-        else:
-            y_coords = torch.zeros_like(ys_all)
-
-        dist = torch.abs((x_coords - float(center_x)) * float(dir_y) - (y_coords - float(center_y)) * float(dir_x))
-        half_width = stroke_width * 0.5
-        eligible = torch.nonzero(dist <= half_width, as_tuple=False).flatten()
-        if eligible.numel() < points:
-            eligible = dist.argsort()[:points]
-
-        perm = torch.randperm(int(eligible.numel()), generator=generator)
-        chosen = eligible[perm[:points]]
-    else:
-        chosen = torch.randperm(total_vertices, generator=generator)[:points]
+    chosen = torch.randperm(total_vertices, generator=generator)[:points]
     ys = (chosen // grid_w).to(torch.long)
     xs = (chosen % grid_w).to(torch.long)
 
@@ -375,23 +315,7 @@ def mesh_drag_warp(
     nchw = flattened.tensor
     device = nchw.device
 
-    stroke_width = float(stroke_width)
-    spacing = int(vertex_spacing)
-    if stroke_width > 0.0:
-        spacing = _effective_vertex_spacing_for_stroke(spacing, stroke_width=stroke_width, height=height, width=width)
-
-    grid_h, grid_w = _compute_vertex_grid_size(height, width, points, spacing=spacing)
-    stroke_params = None
-    if stroke_width > 0.0:
-        stroke_params = [
-            _stroke_params(
-                seed=_seed_for_stroke(_seed_for_batch(seed, batch_index)),
-                direction=direction,
-                height=height,
-                width=width,
-            )
-            for batch_index in range(flattened.batch_size)
-        ]
+    grid_h, grid_w = _compute_vertex_grid_size(height, width, points, spacing=int(vertex_spacing))
     control = torch.stack(
         [
             _make_control_displacement(
@@ -402,10 +326,6 @@ def mesh_drag_warp(
                 drag_max=drag_max,
                 seed=_seed_for_batch(seed, batch_index),
                 direction=direction,
-                stroke_width=stroke_width,
-                stroke_params=stroke_params[batch_index] if stroke_params is not None else None,
-                height=height,
-                width=width,
             )
             for batch_index in range(flattened.batch_size)
         ],
@@ -420,24 +340,66 @@ def mesh_drag_warp(
             mode=displacement_interpolation,
             spline_passes=int(spline_passes),
         )
-        if stroke_params is not None:
-            masks = torch.cat(
-                [
-                    _stroke_mask(
+        stroke_width = float(stroke_width)
+        if stroke_width > 0.0:
+            stroke_length = max(stroke_width * 4.0, float(drag_max) * 4.0, 1.0)
+            stroke_length = min(stroke_length, float(max(height, width)))
+
+            direction = float(direction)
+            if direction >= 0.0:
+                angle = math.radians(direction % 360.0)
+                global_dir_x = float(math.sin(angle))
+                global_dir_y = float(-math.cos(angle))
+            else:
+                global_dir_x = global_dir_y = 0.0
+
+            masks = []
+            for batch_index in range(int(control.shape[0])):
+                control_item = control[batch_index]
+                active = (control_item[0] != 0) | (control_item[1] != 0)
+                coords = torch.nonzero(active, as_tuple=False)
+                if coords.numel() == 0:
+                    masks.append(torch.zeros((1, 1, height, width), device=device, dtype=torch.float32))
+                    continue
+
+                ys = coords[:, 0].to(dtype=torch.float32)
+                xs = coords[:, 1].to(dtype=torch.float32)
+
+                if grid_w > 1 and width > 1:
+                    x0 = xs / float(grid_w - 1) * float(width - 1)
+                else:
+                    x0 = torch.zeros_like(xs)
+                if grid_h > 1 and height > 1:
+                    y0 = ys / float(grid_h - 1) * float(height - 1)
+                else:
+                    y0 = torch.zeros_like(ys)
+
+                if direction >= 0.0:
+                    dir_x = torch.full_like(x0, global_dir_x, dtype=torch.float32, device=device)
+                    dir_y = torch.full_like(y0, global_dir_y, dtype=torch.float32, device=device)
+                else:
+                    dx_vals = control_item[0, coords[:, 0], coords[:, 1]].to(dtype=torch.float32)
+                    dy_vals = control_item[1, coords[:, 0], coords[:, 1]].to(dtype=torch.float32)
+                    norms = torch.sqrt(dx_vals * dx_vals + dy_vals * dy_vals)
+                    norms = torch.where(norms > 1e-6, norms, torch.ones_like(norms))
+                    dir_x = dx_vals / norms
+                    dir_y = dy_vals / norms
+
+                masks.append(
+                    _brush_stroke_mask(
                         height=height,
                         width=width,
-                        center_x=params[0],
-                        center_y=params[1],
-                        dir_x=params[2],
-                        dir_y=params[3],
+                        x0=x0,
+                        y0=y0,
+                        dir_x=dir_x,
+                        dir_y=dir_y,
                         stroke_width=stroke_width,
+                        stroke_length=stroke_length,
                         device=device,
                     )
-                    for params in stroke_params
-                ],
-                dim=0,
-            )
-            disp = disp * masks
+                )
+
+            disp = disp * torch.cat(masks, dim=0)
         if drag_max > 0.0:
             disp = disp.clamp(min=-float(drag_max), max=float(drag_max))
 
@@ -609,7 +571,7 @@ class LatentMeshDrag:
                     "max": 4096.0,
                     "step": 1.0,
                     "round": 0.1,
-                    "tooltip": "When >0, limits the warp to a narrow strip aligned with the direction (like a brush stroke). "
+                    "tooltip": "When >0, limits the warp to narrow brush-stroke channels aligned with the direction (one per dragged mesh point). "
                                "Units are latent pixels. Set to -1 to disable.",
                 }),
             },
@@ -759,7 +721,7 @@ class ImageMeshDrag:
                     "max": 16384.0,
                     "step": 1.0,
                     "round": 0.1,
-                    "tooltip": "When >0, limits the warp to a narrow strip aligned with the direction (like a brush stroke). "
+                    "tooltip": "When >0, limits the warp to narrow brush-stroke channels aligned with the direction (one per dragged mesh point). "
                                "Units are image pixels. Set to -1 to disable.",
                 }),
             },
