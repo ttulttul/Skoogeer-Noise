@@ -503,6 +503,34 @@ def test_image_fractal_brownian_motion_respects_base_noise():
     assert not torch.allclose(simplex, worley)
 
 
+def test_image_fractal_brownian_motion_batch_reproducible_with_seed():
+    node = qnn.ImageFractalBrownianMotion()
+    base = torch.linspace(0.0, 1.0, 24 * 24 * 3, dtype=torch.float32).reshape(1, 24, 24, 3)
+    image = base.repeat(3, 1, 1, 1)
+
+    args = dict(
+        seed=3,
+        base_noise="simplex",
+        frequency=2.0,
+        feature_points=12,
+        octaves=3,
+        persistence=0.5,
+        lacunarity=2.0,
+        distance_metric="euclidean",
+        jitter=0.3,
+        strength=0.5,
+        channel_mode="shared",
+        temporal_mode="locked",
+    )
+
+    (first,) = node.add_fbm_noise(image, **args)
+    (second,) = node.add_fbm_noise(image, **args)
+
+    assert first.shape == image.shape
+    assert torch.allclose(first, second)
+    assert not torch.allclose(first[0], first[1])
+
+
 def test_image_swirl_noise_modifies_pixels():
     node = qnn.ImageSwirlNoise()
     image = make_image()

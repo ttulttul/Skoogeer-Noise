@@ -1706,7 +1706,43 @@ class ImageFractalBrownianMotion:
                 )
             return _fractal_simplex(size, noise_seed, frequency, octaves, persistence, lacunarity, device)
 
-        output = _apply_image_2d_noise(image_tensor, seed, strength, channel_mode, temporal_mode, generator)
+        use_parallel = (
+            strength != 0.0
+            and channel_mode == "shared"
+            and base_noise in ("simplex", "perlin")
+            and image_tensor.dim() == 4
+            and int(image_tensor.shape[0]) > 1
+        )
+
+        if use_parallel:
+            from concurrent.futures import ThreadPoolExecutor
+
+            batch, height, width, channels = image_tensor.shape
+            max_workers = min(int(batch), 4)
+
+            def make_noise(batch_index: int) -> torch.Tensor:
+                noise_seed = int(seed) + int(batch_index)
+                base_field = generator((height, width), noise_seed)
+                return _normalize_noise_tensor(base_field)
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                base_fields = list(executor.map(make_noise, range(int(batch))))
+
+            base_fields_tensor = torch.stack(base_fields, dim=0)
+            noise = base_fields_tensor.unsqueeze(-1).expand(batch, height, width, channels)
+
+            sample_std = image_tensor.float().reshape(int(batch), -1).std(dim=1)
+            strength_value = float(strength)
+            scale = torch.where(
+                sample_std > 1e-6,
+                sample_std * strength_value,
+                torch.full_like(sample_std, strength_value),
+            )
+
+            scaled_noise = (noise * scale.view(int(batch), 1, 1, 1)).to(dtype=image_tensor.dtype)
+            output = image_tensor + scaled_noise
+        else:
+            output = _apply_image_2d_noise(image_tensor, seed, strength, channel_mode, temporal_mode, generator)
 
         return (output.cpu(),)
 
