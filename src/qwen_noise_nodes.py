@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 from typing import Any, Dict, Optional
 
 import torch
@@ -1718,7 +1719,8 @@ class ImageFractalBrownianMotion:
             from concurrent.futures import ThreadPoolExecutor
 
             batch, height, width, channels = image_tensor.shape
-            max_workers = min(int(batch), 4)
+            cpu_count = os.cpu_count() or 1
+            max_workers = min(int(batch), int(cpu_count))
 
             def make_noise(batch_index: int) -> torch.Tensor:
                 noise_seed = int(seed) + int(batch_index)
