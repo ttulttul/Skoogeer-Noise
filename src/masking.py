@@ -103,3 +103,32 @@ def blend_with_mask(original: torch.Tensor, modified: torch.Tensor, mask_nchw: t
     mask = broadcast_mask_nchw(mask_nchw, original).to(dtype=original.dtype)
     return original * (1.0 - mask) + modified.to(dtype=original.dtype) * mask
 
+
+def blend_image_with_mask(original: torch.Tensor, modified: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """
+    Blend BHWC/BTHWC image tensors with a ComfyUI `MASK` input resized to the image resolution.
+    """
+    if not isinstance(mask, torch.Tensor):
+        raise TypeError(f"Expected mask as torch.Tensor, got {type(mask)}")
+    if not isinstance(original, torch.Tensor) or not isinstance(modified, torch.Tensor):
+        raise TypeError("blend_image_with_mask expects torch.Tensor inputs.")
+    if tuple(original.shape) != tuple(modified.shape):
+        raise ValueError(f"Shape mismatch: original={tuple(original.shape)} modified={tuple(modified.shape)}")
+
+    if original.ndim == 4:
+        batch, height, width, _ = original.shape
+        mask_nchw = prepare_mask_nchw(mask, batch_size=int(batch), height=int(height), width=int(width), device=original.device)
+        original_cf = original.permute(0, 3, 1, 2)
+        modified_cf = modified.permute(0, 3, 1, 2)
+        blended_cf = blend_with_mask(original_cf, modified_cf, mask_nchw)
+        return blended_cf.permute(0, 2, 3, 1)
+
+    if original.ndim == 5:
+        batch, frames, height, width, _ = original.shape
+        mask_nchw = prepare_mask_nchw(mask, batch_size=int(batch), height=int(height), width=int(width), device=original.device)
+        original_cf = original.permute(0, 4, 1, 2, 3)
+        modified_cf = modified.permute(0, 4, 1, 2, 3)
+        blended_cf = blend_with_mask(original_cf, modified_cf, mask_nchw)
+        return blended_cf.permute(0, 2, 3, 4, 1)
+
+    raise ValueError(f"Expected image tensor with shape (B,H,W,C) or (B,T,H,W,C), got {tuple(original.shape)}")

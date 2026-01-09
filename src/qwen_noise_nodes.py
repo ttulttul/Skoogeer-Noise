@@ -8,9 +8,9 @@ import torch
 import torch.nn.functional as F
 
 try:
-    from .masking import blend_with_mask, prepare_mask_nchw
+    from .masking import blend_image_with_mask, blend_with_mask, prepare_mask_nchw
 except ImportError:  # pragma: no cover - fallback for direct module loading
-    from masking import blend_with_mask, prepare_mask_nchw
+    from masking import blend_image_with_mask, blend_with_mask, prepare_mask_nchw
 
 try:
     import torchvision.transforms.functional as TF  # type: ignore[import-not-found]
@@ -1221,14 +1221,18 @@ class ImageAddNoise:
                     "step": 0.01,
                     "tooltip": "Strength of the noise. 1.0 adds noise with the same standard deviation as the image.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise addition to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_noise"
     CATEGORY = "Image/Noise"
 
-    def add_noise(self, image, seed, strength):
+    def add_noise(self, image, seed, strength, mask=None):
         if strength == 0.0:
             return (image,)
 
@@ -1242,6 +1246,11 @@ class ImageAddNoise:
         scaled_noise = noise * image_std * strength
 
         noised_image = image_tensor + scaled_noise
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            noised_image = blend_image_with_mask(image_tensor, noised_image, mask)
 
         return (noised_image.cpu(),)
 
@@ -1411,19 +1420,28 @@ class ImagePerlinFractalNoise:
                 }),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Reuse a single noise field for all channels or reseed per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reruns the same pattern per frame; animated reseeds each frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_perlin_noise"
     CATEGORY = "Image/Noise"
 
-    def add_perlin_noise(self, image, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode, temporal_mode):
+    def add_perlin_noise(self, image, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         image_tensor = image.clone().to(device)
 
         generator = lambda size, noise_seed: _fractal_perlin(size, noise_seed, frequency, octaves, persistence, lacunarity, device)
         output = _apply_image_2d_noise(image_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            output = blend_image_with_mask(image_tensor, output, mask)
 
         return (output.cpu(),)
 
@@ -1495,19 +1513,28 @@ class ImageSimplexNoise:
                 "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized simplex noise relative to the image's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Reuse a single noise field for all channels or reseed per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reruns the same pattern per frame; animated reseeds each frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_simplex_noise"
     CATEGORY = "Image/Noise"
 
-    def add_simplex_noise(self, image, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode, temporal_mode):
+    def add_simplex_noise(self, image, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         image_tensor = image.clone().to(device)
 
         generator = lambda size, noise_seed: _fractal_simplex(size, noise_seed, frequency, octaves, persistence, lacunarity, device)
         output = _apply_image_2d_noise(image_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            output = blend_image_with_mask(image_tensor, output, mask)
 
         return (output.cpu(),)
 
@@ -1615,14 +1642,18 @@ class ImageWorleyNoise:
                 "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized Worley noise relative to the image's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Shared noise for all channels or reseeded per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reuses a single noise pattern per frame; animated reseeds each frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_worley_noise"
     CATEGORY = "Image/Noise"
 
-    def add_worley_noise(self, image, seed, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode):
+    def add_worley_noise(self, image, seed, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         image_tensor = image.clone().to(device)
 
@@ -1660,6 +1691,11 @@ class ImageWorleyNoise:
             )
 
         output = _apply_image_2d_noise(image_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            output = blend_image_with_mask(image_tensor, output, mask)
 
         return (output.cpu(),)
 
@@ -1735,19 +1771,28 @@ class ImageReactionDiffusion:
                 "strength": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized pattern relative to the image's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Reuse one simulation for all channels or rerun per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reuses the same pattern for every frame; animated reruns the simulation per frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the pattern injection to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_reaction_diffusion"
     CATEGORY = "Image/Noise"
 
-    def add_reaction_diffusion(self, image, seed, iterations, feed_rate, kill_rate, diffusion_u, diffusion_v, time_step, strength, channel_mode, temporal_mode):
+    def add_reaction_diffusion(self, image, seed, iterations, feed_rate, kill_rate, diffusion_u, diffusion_v, time_step, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         image_tensor = image.clone().to(device)
 
         generator = lambda size, noise_seed: _gray_scott_pattern(size, noise_seed, iterations, feed_rate, kill_rate, diffusion_u, diffusion_v, time_step, device)
         output = _apply_image_2d_noise(image_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            output = blend_image_with_mask(image_tensor, output, mask)
 
         return (output.cpu(),)
 
@@ -1863,14 +1908,18 @@ class ImageFractalBrownianMotion:
                 "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized fBm field relative to the image's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Shared fBm field per sample or reseeded per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reuses the same fBm per frame; animated reseeds each frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_fbm_noise"
     CATEGORY = "Image/Noise"
 
-    def add_fbm_noise(self, image, seed, base_noise, frequency, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode):
+    def add_fbm_noise(self, image, seed, base_noise, frequency, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         image_tensor = image.clone().to(device)
 
@@ -1949,6 +1998,11 @@ class ImageFractalBrownianMotion:
             output = image_tensor + scaled_noise
         else:
             output = _apply_image_2d_noise(image_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            output = blend_image_with_mask(image_tensor, output, mask)
 
         return (output.cpu(),)
 
@@ -2207,14 +2261,18 @@ class ImageSwirlNoise:
                     "step": 0.01,
                     "tooltip": "Blend between original image (0) and fully swirled result (1).",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the swirl to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "add_swirl_noise"
     CATEGORY = "Image/Noise"
 
-    def add_swirl_noise(self, image, seed, vortices, channel_mode, channel_fraction, strength, radius, center_spread, direction_bias, mix):
+    def add_swirl_noise(self, image, seed, vortices, channel_mode, channel_fraction, strength, radius, center_spread, direction_bias, mix, mask=None):
         if strength == 0.0 or mix == 0.0:
             return (image,)
 
@@ -2318,6 +2376,11 @@ class ImageSwirlNoise:
             result = result.reshape(batch, frames, channels, height, width).permute(0, 1, 3, 4, 2)
         else:
             result = result.permute(0, 2, 3, 1)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            result = blend_image_with_mask(image_tensor, result, mask)
 
         return (result.cpu(),)
 

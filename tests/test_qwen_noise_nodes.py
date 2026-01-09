@@ -307,6 +307,20 @@ def test_image_add_noise_reproducible_with_seed():
     assert not torch.allclose(first, third)
 
 
+def test_image_add_noise_respects_mask():
+    node = qnn.ImageAddNoise()
+    image = make_image(height=24, width=24)
+
+    mask = torch.zeros((1, 24, 24), dtype=torch.float32)
+    mask[:, :, :12] = 1.0
+
+    (full,) = node.add_noise(image, seed=123, strength=0.8)
+    (masked,) = node.add_noise(image, seed=123, strength=0.8, mask=mask)
+
+    expected = image * (1.0 - mask.unsqueeze(-1)) + full * mask.unsqueeze(-1)
+    assert torch.allclose(masked, expected)
+
+
 def test_image_add_noise_zero_variance_is_stable():
     node = qnn.ImageAddNoise()
     image = torch.zeros(1, 16, 16, 3)

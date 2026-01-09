@@ -62,3 +62,16 @@ def test_image_noise_strength_zero_noop():
     node = ImageNoise()
     (out,) = node.add_noise(image, seed=1, strength=0.0)
     assert torch.equal(out, image)
+
+
+def test_image_noise_respects_mask():
+    image = torch.zeros(1, 16, 16, 3, dtype=torch.float32)
+    mask = torch.zeros((1, 16, 16), dtype=torch.float32)
+    mask[:, :8, :] = 1.0
+
+    node = ImageNoise()
+    (full,) = node.add_noise(image, seed=42, strength=0.5)
+    (masked,) = node.add_noise(image, seed=42, strength=0.5, mask=mask)
+
+    expected = image * (1.0 - mask.unsqueeze(-1)) + full * mask.unsqueeze(-1)
+    assert torch.allclose(masked, expected)

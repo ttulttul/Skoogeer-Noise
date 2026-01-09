@@ -6,9 +6,9 @@ from typing import Dict
 import torch
 
 try:
-    from .masking import blend_with_mask, prepare_mask_nchw
+    from .masking import blend_image_with_mask, blend_with_mask, prepare_mask_nchw
 except ImportError:  # pragma: no cover - fallback for direct module loading
-    from masking import blend_with_mask, prepare_mask_nchw
+    from masking import blend_image_with_mask, blend_with_mask, prepare_mask_nchw
 
 logger = logging.getLogger(__name__)
 
@@ -162,14 +162,22 @@ class ImageNoise:
                     "round": 0.01,
                     "tooltip": "Noise strength relative to the image's standard deviation.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise addition to masked areas. "
+                                          "The mask is resized to the image resolution (bicubic when downscaling)."}),
+            },
         }
 
-    def add_noise(self, image: torch.Tensor, seed: int, strength: float):
+    def add_noise(self, image: torch.Tensor, seed: int, strength: float, mask=None):
         if not isinstance(image, torch.Tensor):
             raise ValueError(f"IMAGE input must be a torch.Tensor, got {type(image)}.")
 
         noised = add_seeded_noise(image, seed=int(seed), strength=float(strength), scale_by_std=True)
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            noised = blend_image_with_mask(image, noised, mask)
         return (noised,)
 
 

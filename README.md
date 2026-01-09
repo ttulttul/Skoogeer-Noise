@@ -32,6 +32,8 @@ All latent nodes in this pack operate on `latent["samples"]` and preserve other 
 
 ComfyUI images are torch tensors in **BHWC** format: `(B, H, W, C)` (usually `C=3`). Some nodes also accept 5D “video” tensors: `(B, T, H, W, C)`.
 
+Image noise nodes accept an optional `mask` input; when provided, the mask is resized to the image resolution (bicubic when downscaling) and the effect is applied only within the mask.
+
 ### `CONDITIONING`
 
 ComfyUI conditioning is a list of `[embedding, metadata]` entries. The conditioning nodes in this pack operate on:
