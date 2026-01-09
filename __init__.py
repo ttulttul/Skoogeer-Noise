@@ -36,6 +36,7 @@ if __package__:
     )
 else:  # pragma: no cover - direct execution fallback
     _ROOT_DIR = pathlib.Path(__file__).resolve().parent
+    _load_module_from_path("masking", _ROOT_DIR / "src" / "masking.py")
     stats_module = _load_module_from_path(
         "latent_channel_stats_preview", _ROOT_DIR / "src" / "latent_channel_stats_preview.py"
     )

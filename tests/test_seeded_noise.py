@@ -34,6 +34,20 @@ def test_latent_noise_constant_tensor_still_changes():
     assert not torch.allclose(out["samples"], samples)
 
 
+def test_latent_noise_respects_mask():
+    samples = torch.zeros((1, 4, 8, 8), dtype=torch.float32)
+    latent = {"samples": samples}
+    mask = torch.zeros((1, 8, 8), dtype=torch.float32)
+    mask[:, :4, :] = 1.0
+
+    node = LatentNoise()
+    (full,) = node.add_noise(latent, seed=123, strength=1.0)
+    (masked,) = node.add_noise(latent, seed=123, strength=1.0, mask=mask)
+
+    expected = samples * (1.0 - mask.unsqueeze(1)) + full["samples"] * mask.unsqueeze(1)
+    assert torch.allclose(masked["samples"], expected)
+
+
 def test_image_noise_deterministic_for_seed():
     image = torch.linspace(0.0, 1.0, 32 * 32, dtype=torch.float32).reshape(1, 32, 32, 1).repeat(1, 1, 1, 3)
     node = ImageNoise()
@@ -48,4 +62,3 @@ def test_image_noise_strength_zero_noop():
     node = ImageNoise()
     (out,) = node.add_noise(image, seed=1, strength=0.0)
     assert torch.equal(out, image)
-

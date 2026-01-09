@@ -5,6 +5,11 @@ from typing import Dict
 
 import torch
 
+try:
+    from .masking import blend_with_mask, prepare_mask_nchw
+except ImportError:  # pragma: no cover - fallback for direct module loading
+    from masking import blend_with_mask, prepare_mask_nchw
+
 logger = logging.getLogger(__name__)
 
 _SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
@@ -93,10 +98,14 @@ class LatentNoise:
                     "round": 0.01,
                     "tooltip": "Noise strength relative to the latent's standard deviation.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise addition to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
-    def add_noise(self, latent, seed: int, strength: float):
+    def add_noise(self, latent, seed: int, strength: float, mask=None):
         if not isinstance(latent, dict) or "samples" not in latent:
             raise ValueError("LATENT input must be a dictionary containing a 'samples' tensor.")
 
@@ -105,6 +114,18 @@ class LatentNoise:
             raise ValueError(f"LATENT['samples'] must be a torch.Tensor, got {type(samples)}.")
 
         noised = add_seeded_noise(samples, seed=int(seed), strength=float(strength), scale_by_std=True)
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(samples.shape[0]),
+                height=int(samples.shape[-2]),
+                width=int(samples.shape[-1]),
+                device=samples.device,
+            )
+            noised = blend_with_mask(samples, noised, mask_nchw)
+
         out = latent.copy()
         out["samples"] = noised
         return (out,)
@@ -161,4 +182,3 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LatentNoise": "Latent Noise",
     "ImageNoise": "Image Noise",
 }
-

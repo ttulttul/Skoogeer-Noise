@@ -8,6 +8,11 @@ from typing import Callable, Dict, Tuple
 import torch
 import torch.nn.functional as F
 
+try:
+    from .masking import blend_with_mask, prepare_mask_nchw
+except ImportError:  # pragma: no cover - fallback for direct module loading
+    from masking import blend_with_mask, prepare_mask_nchw
+
 logger = logging.getLogger(__name__)
 
 _SEED_STRIDE = 0x9E3779B97F4A7C15  # 64-bit golden ratio constant
@@ -585,6 +590,8 @@ class LatentMeshDrag:
                 }),
             },
             "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the warp to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
                 "displacement_interpolation": (cls._DISPLACEMENT_INTERPOLATION_OPTIONS, {
                     "default": "bicubic",
                     "tooltip": "How to interpolate the sparse mesh drags into a full displacement field. "
@@ -612,6 +619,7 @@ class LatentMeshDrag:
         drag_max: float,
         direction: float = -1.0,
         stroke_width: float = -1.0,
+        mask=None,
         displacement_interpolation: str = "bicubic",
         spline_passes: int = 2,
         sampling_interpolation: str = "bilinear",
@@ -649,11 +657,24 @@ class LatentMeshDrag:
         )
 
         output = latent.copy()
-        output["samples"] = warped
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(samples.shape[0]),
+                height=int(samples.shape[-2]),
+                width=int(samples.shape[-1]),
+                device=samples.device,
+            )
+            output["samples"] = blend_with_mask(samples, warped, mask_nchw)
+        else:
+            output["samples"] = warped
 
         noise_mask = output.get("noise_mask")
         if isinstance(noise_mask, torch.Tensor):
-            output["noise_mask"] = mesh_drag_warp(
+            warped_noise_mask = mesh_drag_warp(
                 noise_mask,
                 points=int(points),
                 drag_min=float(drag_min),
@@ -665,6 +686,14 @@ class LatentMeshDrag:
                 spline_passes=int(spline_passes),
                 sampling_interpolation=str(sampling_interpolation),
             )
+            if mask is not None:
+                output["noise_mask"] = blend_with_mask(
+                    noise_mask,
+                    warped_noise_mask,
+                    mask_nchw.to(device=noise_mask.device),
+                )
+            else:
+                output["noise_mask"] = warped_noise_mask
         return (output,)
 
 

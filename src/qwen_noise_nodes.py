@@ -8,6 +8,11 @@ import torch
 import torch.nn.functional as F
 
 try:
+    from .masking import blend_with_mask, prepare_mask_nchw
+except ImportError:  # pragma: no cover - fallback for direct module loading
+    from masking import blend_with_mask, prepare_mask_nchw
+
+try:
     import torchvision.transforms.functional as TF  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # pragma: no cover - fallback for environments without torchvision
     TF = None
@@ -275,7 +280,19 @@ def _perlin_3d(x, y, z, perm, dtype):
     return _lerp(y1, y2, w)
 
 
-def _fractal_perlin(size, seed, frequency, octaves, persistence, lacunarity, device):
+def _fractal_perlin(
+    size,
+    seed,
+    frequency,
+    octaves,
+    persistence,
+    lacunarity,
+    device,
+    *,
+    progress=None,
+    progress_state=None,
+    progress_total=None,
+):
     if len(size) not in (2, 3):
         raise ValueError("Perlin noise supports 2D or 3D shapes")
 
@@ -286,6 +303,10 @@ def _fractal_perlin(size, seed, frequency, octaves, persistence, lacunarity, dev
     amplitude = 1.0
     max_amplitude = 0.0
     freq = frequency
+
+    progress_cursor = 0
+    if progress_state is not None:
+        progress_cursor = int(progress_state.get("current", 0))
 
     for octave in range(octaves):
         perm = _generate_permutation(seed + octave, device)
@@ -301,6 +322,17 @@ def _fractal_perlin(size, seed, frequency, octaves, persistence, lacunarity, dev
         max_amplitude += amplitude
         amplitude *= persistence
         freq *= lacunarity
+
+        progress_cursor += 1
+        if progress is not None:
+            effective_total = progress_total if progress_total is not None else progress_cursor
+            if hasattr(progress, "update_absolute"):
+                progress.update_absolute(progress_cursor, total=effective_total)
+            else:  # pragma: no cover
+                progress.update(1)
+
+    if progress_state is not None:
+        progress_state["current"] = progress_cursor
 
     if max_amplitude > 0:
         total = total / max_amplitude
@@ -398,7 +430,19 @@ def _simplex_noise_2d(x, y, perm, dtype):
     return 70.0 * (n0 + n1 + n2)
 
 
-def _fractal_simplex(size, seed, frequency, octaves, persistence, lacunarity, device):
+def _fractal_simplex(
+    size,
+    seed,
+    frequency,
+    octaves,
+    persistence,
+    lacunarity,
+    device,
+    *,
+    progress=None,
+    progress_state=None,
+    progress_total=None,
+):
     if len(size) != 2:
         raise ValueError("Simplex noise is implemented for 2D shapes")
 
@@ -410,6 +454,10 @@ def _fractal_simplex(size, seed, frequency, octaves, persistence, lacunarity, de
     max_amplitude = 0.0
     freq = frequency
 
+    progress_cursor = 0
+    if progress_state is not None:
+        progress_cursor = int(progress_state.get("current", 0))
+
     for octave in range(octaves):
         perm = _generate_permutation(seed + octave, device)
         x = coords[1] * freq
@@ -419,6 +467,17 @@ def _fractal_simplex(size, seed, frequency, octaves, persistence, lacunarity, de
         max_amplitude += amplitude
         amplitude *= persistence
         freq *= lacunarity
+
+        progress_cursor += 1
+        if progress is not None:
+            effective_total = progress_total if progress_total is not None else progress_cursor
+            if hasattr(progress, "update_absolute"):
+                progress.update_absolute(progress_cursor, total=effective_total)
+            else:  # pragma: no cover
+                progress.update(1)
+
+    if progress_state is not None:
+        progress_state["current"] = progress_cursor
 
     if max_amplitude > 0:
         total = total / max_amplitude
@@ -838,14 +897,18 @@ class LatentGaussianBlur:
                     "default": "Spatial Only",
                     "tooltip": "Choose whether to blur across spatial dimensions only or include channels.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the blur to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "blur_latent"
     CATEGORY = "Latent/Filter"
 
-    def blur_latent(self, latent, sigma, blur_mode):
+    def blur_latent(self, latent, sigma, blur_mode, mask=None):
         if sigma == 0.0:
             return (latent,)
 
@@ -900,6 +963,18 @@ class LatentGaussianBlur:
         else:
             blurred_tensor = blurred_4d
 
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            blurred_tensor = blend_with_mask(latent_tensor, blurred_tensor, mask_nchw)
+
         out = latent.copy()
         out["samples"] = blurred_tensor.cpu()
         return (out,)
@@ -920,7 +995,11 @@ class LatentFrequencySplit:
                     "step": 0.1,
                     "tooltip": "Radius of the Gaussian used for the low-pass. Higher values move detail into the high band.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the split to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT", "LATENT")
@@ -928,7 +1007,7 @@ class LatentFrequencySplit:
     FUNCTION = "split"
     CATEGORY = "Latent/Filter"
 
-    def split(self, latent, sigma):
+    def split(self, latent, sigma, mask=None):
         device = _get_device()
         latent_tensor = latent["samples"].clone().to(device)
 
@@ -938,6 +1017,19 @@ class LatentFrequencySplit:
         else:
             low_samples = self._gaussian_blur(latent_tensor, sigma)
             high_samples = latent_tensor - low_samples
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            low_samples = blend_with_mask(latent_tensor, low_samples, mask_nchw)
+            high_samples = blend_with_mask(torch.zeros_like(high_samples), high_samples, mask_nchw)
 
         low_latent = latent.copy()
         low_latent["samples"] = low_samples.cpu()
@@ -995,14 +1087,18 @@ class LatentFrequencyMerge:
                     "step": 0.05,
                     "tooltip": "Multiplier for the high-pass band before merging.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the merge adjustments to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "merge"
     CATEGORY = "Latent/Filter"
 
-    def merge(self, low_pass, high_pass, low_gain, high_gain):
+    def merge(self, low_pass, high_pass, low_gain, high_gain, mask=None):
         device = _get_device()
         low_tensor = low_pass["samples"].clone().to(device)
         high_tensor = high_pass["samples"].clone().to(device)
@@ -1016,7 +1112,20 @@ class LatentFrequencyMerge:
         if low_tensor.dtype != high_tensor.dtype:
             high_tensor = high_tensor.to(dtype=low_tensor.dtype)
 
+        base = low_tensor + high_tensor
         merged = low_tensor * float(low_gain) + high_tensor * float(high_gain)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(base.shape[0]),
+                height=int(base.shape[-2]),
+                width=int(base.shape[-1]),
+                device=device,
+            )
+            merged = blend_with_mask(base, merged, mask_nchw)
 
         out = low_pass.copy()
         out["samples"] = merged.cpu()
@@ -1047,14 +1156,18 @@ class LatentAddNoise:
                     "step": 0.01,
                     "tooltip": "Strength of the noise. 1.0 adds noise with the same standard deviation as the latent.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise addition to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_noise"
     CATEGORY = "Latent/Noise"
 
-    def add_noise(self, latent, seed, strength):
+    def add_noise(self, latent, seed, strength, mask=None):
         if strength == 0.0:
             return (latent,)
 
@@ -1068,6 +1181,18 @@ class LatentAddNoise:
         scaled_noise = noise * latent_std * strength
 
         noised_latent = latent_tensor + scaled_noise
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            noised_latent = blend_with_mask(latent_tensor, noised_latent, mask_nchw)
 
         out = latent.copy()
         out["samples"] = noised_latent.cpu()
@@ -1168,14 +1293,18 @@ class LatentPerlinFractalNoise:
                     "default": "shared",
                     "tooltip": "Shared noise across channels or unique noise per channel.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_perlin_noise"
     CATEGORY = "Latent/Noise"
 
-    def add_perlin_noise(self, latent, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode):
+    def add_perlin_noise(self, latent, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode, mask=None):
         if strength == 0.0:
             return (latent,)
 
@@ -1221,6 +1350,17 @@ class LatentPerlinFractalNoise:
             output[batch_index] = sample + scaled_noise
 
         out = latent.copy()
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            output = blend_with_mask(latent_tensor, output, mask_nchw)
         out["samples"] = output.cpu()
 
         return (out,)
@@ -1304,19 +1444,35 @@ class LatentSimplexNoise:
                 "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized simplex noise relative to the latent's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Reuse a single noise field for all channels or reseed per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reruns the same pattern per frame; animated reseeds each frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_simplex_noise"
     CATEGORY = "Latent/Noise"
 
-    def add_simplex_noise(self, latent, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode, temporal_mode):
+    def add_simplex_noise(self, latent, seed, frequency, octaves, persistence, lacunarity, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         latent_tensor = latent["samples"].clone().to(device)
 
         generator = lambda size, noise_seed: _fractal_simplex(size, noise_seed, frequency, octaves, persistence, lacunarity, device)
         output = _apply_2d_noise(latent_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            output = blend_with_mask(latent_tensor, output, mask_nchw)
 
         out = latent.copy()
         out["samples"] = output.cpu()
@@ -1374,14 +1530,18 @@ class LatentWorleyNoise:
                 "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized Worley noise relative to the latent's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Shared noise for all channels or reseeded per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reuses a single noise pattern per frame; animated reseeds each frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_worley_noise"
     CATEGORY = "Latent/Noise"
 
-    def add_worley_noise(self, latent, seed, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode):
+    def add_worley_noise(self, latent, seed, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         latent_tensor = latent["samples"].clone().to(device)
 
@@ -1419,6 +1579,18 @@ class LatentWorleyNoise:
             )
 
         output = _apply_2d_noise(latent_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            output = blend_with_mask(latent_tensor, output, mask_nchw)
 
         out = latent.copy()
         out["samples"] = output.cpu()
@@ -1510,19 +1682,35 @@ class LatentReactionDiffusion:
                 "strength": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized pattern relative to the latent's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Reuse one simulation for all channels or rerun per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reuses the same pattern for every frame; animated reruns the simulation per frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the pattern injection to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_reaction_diffusion"
     CATEGORY = "Latent/Noise"
 
-    def add_reaction_diffusion(self, latent, seed, iterations, feed_rate, kill_rate, diffusion_u, diffusion_v, time_step, strength, channel_mode, temporal_mode):
+    def add_reaction_diffusion(self, latent, seed, iterations, feed_rate, kill_rate, diffusion_u, diffusion_v, time_step, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         latent_tensor = latent["samples"].clone().to(device)
 
         generator = lambda size, noise_seed: _gray_scott_pattern(size, noise_seed, iterations, feed_rate, kill_rate, diffusion_u, diffusion_v, time_step, device)
         output = _apply_2d_noise(latent_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            output = blend_with_mask(latent_tensor, output, mask_nchw)
 
         out = latent.copy()
         out["samples"] = output.cpu()
@@ -1584,14 +1772,18 @@ class LatentFractalBrownianMotion:
                 "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 5.0, "step": 0.01, "tooltip": "Scale of the normalized fBm field relative to the latent's standard deviation."}),
                 "channel_mode": (["shared", "per_channel"], {"default": "shared", "tooltip": "Shared fBm field per sample or reseeded per channel."}),
                 "temporal_mode": (["locked", "animated"], {"default": "locked", "tooltip": "locked reuses the same fBm per frame; animated reseeds each frame."}),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noise injection to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_fbm_noise"
     CATEGORY = "Latent/Noise"
 
-    def add_fbm_noise(self, latent, seed, base_noise, frequency, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode):
+    def add_fbm_noise(self, latent, seed, base_noise, frequency, feature_points, octaves, persistence, lacunarity, distance_metric, jitter, strength, channel_mode, temporal_mode, mask=None):
         device = _get_device()
         latent_tensor = latent["samples"].clone().to(device)
 
@@ -1633,6 +1825,18 @@ class LatentFractalBrownianMotion:
             return _fractal_simplex(size, noise_seed, frequency, octaves, persistence, lacunarity, device)
 
         output = _apply_2d_noise(latent_tensor, seed, strength, channel_mode, temporal_mode, generator)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            output = blend_with_mask(latent_tensor, output, mask_nchw)
 
         out = latent.copy()
         out["samples"] = output.cpu()
@@ -1810,14 +2014,18 @@ class LatentSwirlNoise:
                     "step": 0.01,
                     "tooltip": "Blend between original latent (0) and fully swirled result (1).",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the swirl to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_swirl_noise"
     CATEGORY = "Latent/Noise"
 
-    def add_swirl_noise(self, latent, seed, vortices, channel_mode, channel_fraction, strength, radius, center_spread, direction_bias, mix):
+    def add_swirl_noise(self, latent, seed, vortices, channel_mode, channel_fraction, strength, radius, center_spread, direction_bias, mix, mask=None):
         if strength == 0.0 or mix == 0.0:
             return (latent,)
 
@@ -1919,6 +2127,18 @@ class LatentSwirlNoise:
 
         if is_video:
             result = result.reshape(batch, frames, channels, height, width).permute(0, 2, 1, 3, 4)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            result = blend_with_mask(latent_tensor, result, mask_nchw)
 
         out = latent.copy()
         out["samples"] = result.cpu()
@@ -2123,14 +2343,18 @@ class LatentForwardDiffusion:
                     "step": 0.01,
                     "tooltip": "The point in the schedule to noise to. Must match the KSampler's effective start step.",
                 }),
-            }
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask (often image-sized) to limit the noising to masked areas. "
+                                          "The mask is resized to latent resolution (bicubic when downscaling)."}),
+            },
         }
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "add_scheduled_noise"
     CATEGORY = "Latent/Noise"
 
-    def add_scheduled_noise(self, model, latent, seed, steps, noise_strength):
+    def add_scheduled_noise(self, model, latent, seed, steps, noise_strength, mask=None):
         if noise_strength == 0.0:
             return (latent,)
 
@@ -2155,6 +2379,18 @@ class LatentForwardDiffusion:
         noise = torch.randn(latent_tensor.shape, generator=generator, device=device, dtype=latent_tensor.dtype)
 
         noised_latent = latent_tensor + noise * sigma
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=int(latent_tensor.shape[0]),
+                height=int(latent_tensor.shape[-2]),
+                width=int(latent_tensor.shape[-1]),
+                device=device,
+            )
+            noised_latent = blend_with_mask(latent_tensor, noised_latent, mask_nchw)
 
         out = latent.copy()
         out["samples"] = noised_latent.cpu()

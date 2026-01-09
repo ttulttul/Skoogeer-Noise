@@ -102,6 +102,21 @@ def test_latent_add_noise_reproducible_with_seed():
     assert not torch.allclose(first["samples"], third["samples"])
 
 
+def test_latent_add_noise_respects_mask():
+    node = qnn.LatentAddNoise()
+    latent = make_flow_matching_latent()
+
+    mask = torch.zeros((1, FLOW_MATCHING_WIDTH, FLOW_MATCHING_HEIGHT), dtype=torch.float32)
+    mask[:, : FLOW_MATCHING_WIDTH // 2, :] = 1.0
+
+    (full,) = node.add_noise(latent, seed=123, strength=0.8)
+    (masked,) = node.add_noise(latent, seed=123, strength=0.8, mask=mask)
+
+    mask_view = mask.unsqueeze(1).unsqueeze(2)
+    expected = latent["samples"] * (1.0 - mask_view) + full["samples"] * mask_view
+    assert torch.allclose(masked["samples"], expected)
+
+
 def test_latent_add_noise_negative_strength_inverts_delta():
     node = qnn.LatentAddNoise()
     latent = make_flow_matching_latent()

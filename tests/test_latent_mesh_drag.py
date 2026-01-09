@@ -2,6 +2,7 @@ import pathlib
 import sys
 
 import torch
+import torch.nn.functional as F
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -14,6 +15,7 @@ from src.latent_mesh_drag import (  # noqa: E402
     mesh_drag_warp,
     mesh_drag_warp_image,
 )
+from src.masking import prepare_mask_nchw  # noqa: E402
 
 
 def test_mesh_drag_warp_noop_when_disabled():
@@ -207,6 +209,37 @@ def test_node_warps_noise_mask_in_lockstep():
     assert out_latent["samples"].shape == samples.shape
     assert out_latent["noise_mask"].shape == noise_mask.shape
     assert torch.allclose(out_latent["noise_mask"], out_latent["samples"][:, 0])
+
+
+def test_latent_mesh_drag_mask_limits_warp_region_and_respects_noise_mask():
+    base = torch.linspace(0.0, 1.0, 16 * 16, dtype=torch.float32).reshape(1, 1, 16, 16)
+    samples = base.repeat(1, 4, 1, 1)
+    noise_mask = base.squeeze(1)
+    latent = {"samples": samples, "noise_mask": noise_mask}
+
+    mask = torch.zeros((1, 16, 16), dtype=torch.float32)
+    mask[:, :, :8] = 1.0
+
+    node = LatentMeshDrag()
+    (out_latent,) = node.drag(latent, seed=123, points=10, drag_min=1.0, drag_max=3.0, mask=mask)
+
+    expected_warped = mesh_drag_warp(samples, points=10, drag_min=1.0, drag_max=3.0, seed=123)
+    expected_samples = samples * (1.0 - mask.unsqueeze(1)) + expected_warped * mask.unsqueeze(1)
+    assert torch.allclose(out_latent["samples"], expected_samples)
+
+    expected_noise_warped = mesh_drag_warp(noise_mask, points=10, drag_min=1.0, drag_max=3.0, seed=123)
+    expected_noise = noise_mask * (1.0 - mask) + expected_noise_warped * mask
+    assert torch.allclose(out_latent["noise_mask"], expected_noise)
+    assert torch.allclose(out_latent["noise_mask"], out_latent["samples"][:, 0])
+
+
+def test_mask_downscales_with_bicubic_interpolation():
+    torch.manual_seed(0)
+    mask = torch.rand((1, 64, 64), dtype=torch.float32)
+    out = prepare_mask_nchw(mask, batch_size=1, height=16, width=16, device=torch.device("cpu"))
+
+    expected = F.interpolate(mask.unsqueeze(1), size=(16, 16), mode="bicubic", align_corners=False).clamp(0.0, 1.0)
+    assert torch.allclose(out, expected)
 
 
 def test_mesh_drag_warp_repeats_per_batch_across_extra_dims():

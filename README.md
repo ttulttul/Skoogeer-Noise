@@ -26,7 +26,7 @@ ComfyUI latents are dictionaries containing a `"samples"` tensor.
 - Most SD-style latents: `(B, C, H, W)`
 - Some video / flow-matching latents: `(B, C, T, H, W)`
 
-All latent nodes in this pack operate on `latent["samples"]` and preserve other latent dict keys. `Latent Mesh Drag` also warps `latent["noise_mask"]` when present.
+All latent nodes in this pack operate on `latent["samples"]` and preserve other latent dict keys. Most latent nodes accept an optional `mask` input; when provided, the mask is resized to latent resolution (bicubic when downscaling) and the effect is applied only within the mask. `Latent Mesh Drag` also warps `latent["noise_mask"]` when present.
 
 ### `IMAGE`
 
@@ -97,6 +97,7 @@ Applies a cloth-like spatial warp to a `LATENT` by randomly dragging control ver
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `latent` | `LATENT` | – | – | Latent to warp spatially using a random mesh drag. |
+| `mask` | `MASK` | – | – | Optional mask to limit the warp to masked areas. The mask is resized to latent resolution (bicubic when downscaling). |
 | `seed` | `INT` | `0` | `0..2^64-1` | Seed controlling which mesh points are dragged and by how much. |
 | `points` | `INT` | `12` | `0..2048` | Number of mesh vertices to randomly drag. |
 | `drag_min` | `FLOAT` | `0.0` | `0.0..128.0` | Minimum drag distance (**latent pixels**). |
@@ -110,7 +111,8 @@ Applies a cloth-like spatial warp to a `LATENT` by randomly dragging control ver
 #### Notes
 
 - Drag distances are specified in **latent pixels** (multiply by ~8 for image-space pixels with SD-style VAEs).
-- If the input latent contains a `noise_mask` tensor, it is warped using the same displacement.
+- If a `mask` is supplied, the warp is applied only in the masked area (and the mask is resized to latent resolution).
+- If the input latent contains a `noise_mask` tensor, it is warped using the same displacement (and respects the `mask` when provided).
 
 ---
 
