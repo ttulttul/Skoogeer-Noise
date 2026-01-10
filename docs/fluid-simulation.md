@@ -241,3 +241,175 @@ class FluidImageAdvection:
 * **Pressure projection toggle**
 * **GPU shader backend**
 
+---
+
+## Smoke Simulation Parameters (Optional Mode)
+
+### Overview
+
+Smoke is simulated by extending the fluid system with **buoyancy-driven motion** and **density evolution**. The image (or a derived density field) is treated as smoke density that rises due to buoyancy, cools over time, and forms characteristic billows through vorticity.
+
+This mode prioritizes **visual plausibility and control**, not physical accuracy.
+
+---
+
+### Additional Fields
+
+When `mode = "smoke"` is enabled, the solver maintains:
+
+* **Density field** `ρ(x, y)`
+
+  * Represents smoke concentration
+    * Typically derived from image luminance or alpha
+
+    * **Temperature field** `T(x, y)` (optional, but recommended)
+
+      * Drives stronger initial upward motion
+        * Decays over time (cooling)
+
+        If temperature is disabled, buoyancy can be driven by density alone.
+
+        ---
+
+### New Node Parameters
+
+| Parameter             | Type  | Description                      |
+| --------------------- | ----- | -------------------------------- |
+| smoke_mode            | BOOL  | Enables smoke simulation         |
+| buoyancy              | FLOAT | Strength of upward buoyant force |
+| ambient_updraft       | FLOAT | Constant upward airflow          |
+| density_fade          | FLOAT | Density dissipation per step     |
+| temperature_strength  | FLOAT | Initial temperature injection    |
+| cooling_rate          | FLOAT | Temperature decay per step       |
+| smoke_source_strength | FLOAT | Amount of density injected       |
+| smoke_source_radius   | FLOAT | Radius of smoke injection        |
+| smoke_source_mode     | ENUM  | image / random / mask            |
+
+---
+
+### Buoyancy Force Model
+
+At each simulation step, a buoyancy force is added to the velocity field:
+
+```pseudo
+F_buoyancy = (β * T - α * ρ) * up_vector
+velocity += F_buoyancy * dt
+```
+
+Where:
+
+* `β` is controlled by **buoyancy**
+* `α` is implicitly tied to density
+* `up_vector = (0, -1)` in image space
+
+This produces:
+
+* Rising smoke columns
+* Natural billowing
+* Self-organizing plumes
+
+---
+
+### Density & Temperature Injection
+
+Smoke can be injected in several ways:
+
+#### 1. Image-derived (default)
+
+* Density initialized from image luminance or alpha
+* Bright areas → denser smoke
+
+#### 2. Random sources
+
+* Small stochastic puffs injected per step
+
+#### 3. Mask-based
+
+* External mask controls emission region
+
+Example injection:
+
+```pseudo
+ρ += smoke_source_strength * falloff(radius)
+T += temperature_strength * falloff(radius)
+```
+
+---
+
+### Per-Step Smoke Reveal Order
+
+When smoke mode is active, the simulation loop becomes:
+
+```pseudo
+inject_density()
+inject_temperature()
+
+apply_buoyancy()
+apply_ambient_updraft()
+apply_vorticity_confinement()
+
+advect_velocity()
+advect_density()
+advect_temperature()
+
+cool_temperature()
+fade_density()
+```
+
+This order is important for maintaining coherent plumes.
+
+---
+
+### Parameter Defaults (Good Starting Points)
+
+**Soft smoke**
+
+```
+buoyancy = 1.5
+ambient_updraft = 0.1
+vorticity = 0.3
+density_fade = 0.01
+cooling_rate = 0.05
+```
+
+**Fire / hot smoke**
+
+```
+buoyancy = 3.0
+ambient_updraft = 0.3
+vorticity = 0.8
+temperature_strength = 2.0
+cooling_rate = 0.1
+```
+
+---
+
+### Interaction with Existing Parameters
+
+* **Vorticity** becomes more visually important
+* **Velocity damping** should be lower
+* **Diffusion** should be minimal or zero
+* **Resolution scaling** strongly affects plume detail
+
+---
+
+### Output Interpretation
+
+* Density modulates image opacity or brightness
+* Velocity field shapes plume motion
+* Final image may be:
+
+  * Density-only (grayscale smoke)
+    * Density composited over original image
+      * Color advected smoke
+
+      ---
+
+### Design Rationale
+
+* Buoyancy explains *why* smoke rises
+* Density creates structure
+* Temperature creates energy and life
+* Parameters map cleanly to artist intuition
+* Fully compatible with the existing solver
+

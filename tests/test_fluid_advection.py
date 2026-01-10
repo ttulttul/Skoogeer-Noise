@@ -1,13 +1,18 @@
 import pathlib
 import sys
 
+import pytest
 import torch
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.fluid_advection import FluidLatentAdvection  # noqa: E402
+from src.fluid_advection import (  # noqa: E402
+    FluidLatentAdvection,
+    ImageSmokeSimulation,
+    LatentSmokeSimulation,
+)
 
 
 def test_fluid_latent_advection_noop_when_steps_zero():
@@ -139,3 +144,185 @@ def test_fluid_latent_advection_mask_limits_effect_region():
     assert torch.allclose(out_samples[outside], samples[outside], atol=1e-6)
     assert not torch.allclose(out_samples, samples)
 
+
+def test_smoke_latent_simulation_deterministic_for_seed():
+    torch.manual_seed(0)
+    samples = torch.randn(1, 4, 24, 24)
+    latent = {"samples": samples}
+
+    node = LatentSmokeSimulation()
+    out1, _, _ = node.run(
+        latent,
+        steps=12,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=4.0,
+        force_radius=0.2,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.3,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="random",
+        seed=999,
+        wrap_mode="wrap",
+    )
+    out2, _, _ = node.run(
+        latent,
+        steps=12,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=4.0,
+        force_radius=0.2,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.3,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="random",
+        seed=999,
+        wrap_mode="wrap",
+    )
+    assert torch.allclose(out1["samples"], out2["samples"])
+
+
+def test_smoke_latent_simulation_warps_noise_mask_in_lockstep():
+    base = torch.linspace(0.0, 1.0, 20 * 20, dtype=torch.float32).reshape(1, 1, 20, 20)
+    samples = base.repeat(1, 4, 1, 1)
+    noise_mask = base.squeeze(1)
+    latent = {"samples": samples, "noise_mask": noise_mask}
+
+    node = LatentSmokeSimulation()
+    out_latent, density_preview, velocity_preview = node.run(
+        latent,
+        steps=8,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=4.0,
+        force_radius=0.25,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.6,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="image",
+        seed=123,
+        wrap_mode="mirror",
+    )
+
+    assert out_latent["samples"].shape == samples.shape
+    assert out_latent["noise_mask"].shape == noise_mask.shape
+    assert torch.allclose(out_latent["noise_mask"], out_latent["samples"][:, 0], atol=1e-5)
+    assert density_preview.shape == (1, 20, 20, 3)
+    assert velocity_preview.shape == (1, 20, 20, 3)
+
+
+def test_smoke_latent_simulation_requires_mask_for_mask_mode():
+    samples = torch.randn(1, 4, 16, 16)
+    latent = {"samples": samples}
+
+    node = LatentSmokeSimulation()
+    with pytest.raises(ValueError):
+        node.run(
+            latent,
+            steps=4,
+            dt=1.0,
+            resolution_scale=1.0,
+            force_count=3,
+            force_strength=4.0,
+            force_radius=0.2,
+            swirl_strength=2.0,
+            velocity_damping=0.98,
+            diffusion=0.0,
+            vorticity=0.3,
+            buoyancy=1.5,
+            ambient_updraft=0.1,
+            density_fade=0.01,
+            temperature_strength=0.0,
+            cooling_rate=0.05,
+            smoke_source_strength=1.0,
+            smoke_source_radius=0.1,
+            smoke_source_mode="mask",
+            seed=123,
+            wrap_mode="clamp",
+        )
+
+
+def test_smoke_image_simulation_preserves_shape_and_is_deterministic():
+    image = torch.linspace(0.0, 1.0, 32 * 32, dtype=torch.float32).reshape(1, 32, 32, 1).repeat(1, 1, 1, 3)
+
+    node = ImageSmokeSimulation()
+    out1, density1, vel1 = node.run(
+        image,
+        steps=10,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=6.0,
+        force_radius=0.2,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.3,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="image",
+        seed=7,
+        wrap_mode="wrap",
+    )
+    out2, density2, vel2 = node.run(
+        image,
+        steps=10,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=6.0,
+        force_radius=0.2,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.3,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="image",
+        seed=7,
+        wrap_mode="wrap",
+    )
+
+    assert out1.shape == image.shape
+    assert density1.shape == (1, 32, 32, 3)
+    assert vel1.shape == (1, 32, 32, 3)
+    assert torch.allclose(out1, out2)
+    assert torch.allclose(density1, density2)
+    assert torch.allclose(vel1, vel2)
