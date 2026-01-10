@@ -58,6 +58,8 @@ ComfyUI conditioning is a list of `[embedding, metadata]` entries. The condition
 |------|----------|-----------|
 | `Latent Mesh Drag` | `latent/perturb` | `LATENT` |
 | `Image Mesh Drag` | `image/perturb` | `IMAGE` |
+| `Fluid Latent Advection` | `latent/perturb` | `LATENT`, `IMAGE` |
+| `Fluid Image Advection` | `image/perturb` | `IMAGE`, `IMAGE` |
 | `Latent Noise` | `latent/perturb` | `LATENT` |
 | `Image Noise` | `image/perturb` | `IMAGE` |
 | `Latent Channel Stats Preview` | `latent/debug` | `IMAGE` |
