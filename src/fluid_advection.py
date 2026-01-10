@@ -13,12 +13,56 @@ try:
 except ImportError:  # pragma: no cover - fallback for direct module loading
     from masking import blend_image_with_mask, blend_with_mask, prepare_mask_nchw
 
+try:
+    import comfy.utils as comfy_utils  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # pragma: no cover - comfy is only available inside ComfyUI
+    comfy_utils = None
+
 logger = logging.getLogger(__name__)
 
 _SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
 _WRAP_MODES: Tuple[str, ...] = ("clamp", "wrap", "mirror")
 _SMOKE_SOURCE_MODES: Tuple[str, ...] = ("image", "random", "mask")
 _TEMPERATURE_CLAMP_MAX = 50.0
+
+
+class _ProgressBar:
+    def __init__(self, total: int):
+        self.total = int(total)
+        self.current = 0
+        self._bar = None
+        if comfy_utils is not None:
+            try:
+                self._bar = comfy_utils.ProgressBar(self.total)
+            except Exception:  # pragma: no cover - defensive
+                self._bar = None
+
+    def update(self, amount: int) -> None:
+        amount = int(amount)
+        self.current += amount
+        if self._bar is None:
+            return
+        if hasattr(self._bar, "update"):
+            self._bar.update(amount)
+        elif hasattr(self._bar, "update_absolute"):
+            self._bar.update_absolute(self.current, total=self.total)
+
+    def update_absolute(self, value: int, *, total: Optional[int] = None) -> None:
+        if total is not None:
+            self.total = int(total)
+        value = int(value)
+        delta = value - self.current
+        self.current = value
+        if self._bar is None:
+            return
+        if hasattr(self._bar, "update_absolute"):
+            self._bar.update_absolute(self.current, total=self.total)
+        elif hasattr(self._bar, "update") and delta:
+            self._bar.update(delta)
+
+
+def _progress_bar(total: int) -> _ProgressBar:
+    return _ProgressBar(total)
 
 
 @dataclass(frozen=True)
@@ -463,6 +507,7 @@ def _simulate_fluid_advection(
     vorticity: float,
     seed: int,
     wrap_mode: str,
+    progress: Optional[_ProgressBar] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     if field.ndim != 4:
         raise ValueError(f"Expected field shape (B,C,H,W), got {tuple(field.shape)}")
@@ -537,6 +582,9 @@ def _simulate_fluid_advection(
                 logger.warning("Fluid simulation produced non-finite values at step %d; clamping to finite range.", step)
                 field_sim = torch.nan_to_num(field_sim, nan=0.0, posinf=0.0, neginf=0.0)
 
+            if progress is not None:
+                progress.update(1)
+
         if (sim_h, sim_w) != (int(height), int(width)):
             field_out = F.interpolate(field_sim, size=(int(height), int(width)), mode="bilinear", align_corners=False)
             velocity_out = F.interpolate(velocity, size=(int(height), int(width)), mode="bilinear", align_corners=False)
@@ -574,6 +622,7 @@ def _simulate_smoke(
     source_density: Optional[torch.Tensor],
     field_injection: Optional[torch.Tensor],
     fade_field: bool,
+    progress: Optional[_ProgressBar] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if field.ndim != 4:
         raise ValueError(f"Expected field shape (B,C,H,W), got {tuple(field.shape)}")
@@ -735,6 +784,9 @@ def _simulate_smoke(
                 density = torch.nan_to_num(density, nan=0.0, posinf=0.0, neginf=0.0).clamp(0.0, 1.0)
                 temperature = torch.nan_to_num(temperature, nan=0.0, posinf=0.0, neginf=0.0).clamp(0.0, float(_TEMPERATURE_CLAMP_MAX))
 
+            if progress is not None:
+                progress.update(1)
+
         if (sim_h, sim_w) != (int(height), int(width)):
             field_out = F.interpolate(field_sim, size=(int(height), int(width)), mode="bilinear", align_corners=False)
             density_out = F.interpolate(density, size=(int(height), int(width)), mode="bilinear", align_corners=False)
@@ -880,6 +932,20 @@ class FluidLatentAdvection:
         if samples.ndim < 3:
             raise ValueError(f"LATENT['samples'] must have at least 3 dims, got {tuple(samples.shape)}.")
 
+        progress_bar = None
+        steps_int = int(steps)
+        active_sim = (
+            steps_int > 0
+            and int(force_count) > 0
+            and float(force_radius) > 0.0
+            and (float(force_strength) != 0.0 or float(swirl_strength) != 0.0)
+        )
+        if active_sim:
+            total_passes = 1
+            if "noise_mask" in latent and isinstance(latent["noise_mask"], torch.Tensor):
+                total_passes += 1
+            progress_bar = _progress_bar(max(1, steps_int * total_passes))
+
         flattened = _flatten_latent_channels(samples)
         field_out, preview = _simulate_fluid_advection(
             flattened.tensor,
@@ -895,6 +961,7 @@ class FluidLatentAdvection:
             vorticity=float(vorticity),
             seed=int(seed),
             wrap_mode=str(wrap_mode),
+            progress=progress_bar,
         )
         out_samples = flattened.restore(field_out)
 
@@ -935,6 +1002,7 @@ class FluidLatentAdvection:
                 vorticity=float(vorticity),
                 seed=int(seed),
                 wrap_mode=str(wrap_mode),
+                progress=progress_bar,
             )
             advected_mask = flattened_mask.restore(advected_mask)
             if mask is not None:
@@ -1099,6 +1167,17 @@ class FluidImageAdvection:
         if image.ndim != 4 or int(image.shape[-1]) not in (1, 3, 4):
             raise ValueError(f"Expected IMAGE tensor with shape (B,H,W,C), got {tuple(image.shape)}")
 
+        progress_bar = None
+        steps_int = int(steps)
+        active_sim = (
+            steps_int > 0
+            and int(force_count) > 0
+            and float(force_radius) > 0.0
+            and (float(force_strength) != 0.0 or float(swirl_strength) != 0.0)
+        )
+        if active_sim:
+            progress_bar = _progress_bar(max(1, steps_int))
+
         image_cf = image.permute(0, 3, 1, 2)
         out_cf, preview = _simulate_fluid_advection(
             image_cf,
@@ -1114,6 +1193,7 @@ class FluidImageAdvection:
             vorticity=float(vorticity),
             seed=int(seed),
             wrap_mode=str(wrap_mode),
+            progress=progress_bar,
         )
         out = out_cf.permute(0, 2, 3, 1)
         if mask is not None:
@@ -1313,6 +1393,11 @@ class LatentSmokeSimulation:
         if not isinstance(samples, torch.Tensor):
             raise ValueError(f"LATENT['samples'] must be a torch.Tensor, got {type(samples)}.")
 
+        progress_bar = None
+        steps_int = int(steps)
+        if steps_int > 0:
+            progress_bar = _progress_bar(max(1, steps_int))
+
         samples_flat = _flatten_latent_channels(samples)
         noise_mask = latent.get("noise_mask")
         noise_flat: Optional[_FlattenedLatent] = None
@@ -1367,6 +1452,7 @@ class LatentSmokeSimulation:
             source_density=density_source,
             field_injection=None,
             fade_field=False,
+            progress=progress_bar,
         )
 
         samples_adv_cf = combined_out[:, :sample_channels]
@@ -1497,6 +1583,11 @@ class ImageSmokeSimulation:
         if image.ndim != 4 or int(image.shape[-1]) not in (1, 3, 4):
             raise ValueError(f"Expected IMAGE tensor with shape (B,H,W,C), got {tuple(image.shape)}")
 
+        progress_bar = None
+        steps_int = int(steps)
+        if steps_int > 0:
+            progress_bar = _progress_bar(max(1, steps_int))
+
         image_cf = image.permute(0, 3, 1, 2)
 
         mode = str(smoke_source_mode).strip().lower()
@@ -1541,6 +1632,7 @@ class ImageSmokeSimulation:
             source_density=density_source,
             field_injection=image_cf,
             fade_field=True,
+            progress=progress_bar,
         )
 
         out = out_cf.permute(0, 2, 3, 1).clamp(0.0, 1.0).to(dtype=image.dtype)
