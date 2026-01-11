@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
 _WRAP_MODES: Tuple[str, ...] = ("clamp", "wrap", "mirror")
 _SMOKE_SOURCE_MODES: Tuple[str, ...] = ("image", "random", "mask")
+_SMOKE_OUTPUT_MODES: Tuple[str, ...] = ("final", "batch")
 _TEMPERATURE_CLAMP_MAX = 50.0
 
 
@@ -102,7 +103,8 @@ def _flatten_latent_channels(tensor: torch.Tensor) -> _FlattenedLatent:
     flattened = tensor.reshape(batch, channels * extra_dim, height, width)
 
     def restore(out: torch.Tensor) -> torch.Tensor:
-        return out.reshape(batch, channels, *extra_shape, height, width)
+        out_batch = int(out.shape[0])
+        return out.reshape(out_batch, channels, *extra_shape, height, width)
 
     return _FlattenedLatent(tensor=flattened, restore=restore)
 
@@ -316,18 +318,33 @@ def _random_smoke_source(
     inv_radius2 = 1.0 / max(radius2, 1e-12)
 
     source = torch.zeros((int(batch), 1, int(height), int(width)), device=device, dtype=torch.float32)
-    for _ in range(int(puff_count)):
-        x0 = torch.rand((int(batch),), generator=generator, dtype=torch.float32) * float(max(int(width) - 1, 1))
-        y0 = torch.rand((int(batch),), generator=generator, dtype=torch.float32) * float(max(int(height) - 1, 1))
-        x0 = x0.to(device=device).view(int(batch), 1, 1)
-        y0 = y0.to(device=device).view(int(batch), 1, 1)
+    batch = int(batch)
+    height = int(height)
+    width = int(width)
+    puff_count = int(puff_count)
+
+    samples = torch.rand((puff_count, 2, batch), generator=generator, device=device, dtype=torch.float32)
+    x0_all = samples[:, 0, :].transpose(0, 1) * float(max(width - 1, 1))
+    y0_all = samples[:, 1, :].transpose(0, 1) * float(max(height - 1, 1))
+
+    grid_x = grid_x.view(1, 1, height, width)
+    grid_y = grid_y.view(1, 1, height, width)
+
+    chunk_size = 8 if device.type == "cpu" else 16
+    chunk_size = max(1, min(int(chunk_size), puff_count))
+
+    for start in range(0, puff_count, chunk_size):
+        end = min(puff_count, start + chunk_size)
+        x0 = x0_all[:, start:end].view(batch, -1, 1, 1)
+        y0 = y0_all[:, start:end].view(batch, -1, 1, 1)
 
         rx = grid_x - x0
         ry = grid_y - y0
         d2 = rx * rx + ry * ry
         mask = d2 < radius2
         falloff = torch.exp(-d2 * inv_radius2) * mask
-        source = torch.maximum(source, falloff.unsqueeze(1))
+        chunk_max = falloff.amax(dim=1, keepdim=True)
+        source = torch.maximum(source, chunk_max)
     return source
 
 
@@ -394,17 +411,27 @@ def _inject_forces(
     radius2 = float(radius_px * radius_px)
     inv_radius2 = 1.0 / max(radius2, 1e-12)
 
-    for _ in range(int(force_count)):
-        x0 = torch.rand((batch,), generator=generator, dtype=torch.float32) * float(max(width - 1, 1))
-        y0 = torch.rand((batch,), generator=generator, dtype=torch.float32) * float(max(height - 1, 1))
-        angles = torch.rand((batch,), generator=generator, dtype=torch.float32) * float(2.0 * math.pi)
-        dir_x = torch.cos(angles)
-        dir_y = torch.sin(angles)
+    device = velocity.device
+    force_count = int(force_count)
+    samples = torch.rand((force_count, 3, batch), generator=generator, device=device, dtype=torch.float32)
+    x0_all = samples[:, 0, :].transpose(0, 1) * float(max(width - 1, 1))
+    y0_all = samples[:, 1, :].transpose(0, 1) * float(max(height - 1, 1))
+    angles_all = samples[:, 2, :].transpose(0, 1) * float(2.0 * math.pi)
+    dir_x_all = torch.cos(angles_all)
+    dir_y_all = torch.sin(angles_all)
 
-        x0 = x0.to(device=velocity.device).view(batch, 1, 1)
-        y0 = y0.to(device=velocity.device).view(batch, 1, 1)
-        dir_x = dir_x.to(device=velocity.device).view(batch, 1, 1)
-        dir_y = dir_y.to(device=velocity.device).view(batch, 1, 1)
+    grid_x = grid_x.view(1, 1, height, width)
+    grid_y = grid_y.view(1, 1, height, width)
+
+    chunk_size = 8 if device.type == "cpu" else 16
+    chunk_size = max(1, min(int(chunk_size), force_count))
+
+    for start in range(0, force_count, chunk_size):
+        end = min(force_count, start + chunk_size)
+        x0 = x0_all[:, start:end].view(batch, -1, 1, 1)
+        y0 = y0_all[:, start:end].view(batch, -1, 1, 1)
+        dir_x = dir_x_all[:, start:end].view(batch, -1, 1, 1)
+        dir_y = dir_y_all[:, start:end].view(batch, -1, 1, 1)
 
         rx = grid_x - x0
         ry = grid_y - y0
@@ -413,14 +440,20 @@ def _inject_forces(
         mask = d2 < radius2
         falloff = torch.exp(-d2 * inv_radius2) * mask
 
-        inv_d = torch.rsqrt(torch.clamp(d2, min=1e-12))
-        tan_x = -ry * inv_d
-        tan_y = rx * inv_d
+        dv_x = torch.zeros_like(falloff)
+        dv_y = torch.zeros_like(falloff)
+        if strength != 0.0:
+            dv_x = dv_x + dir_x * strength * falloff
+            dv_y = dv_y + dir_y * strength * falloff
+        if swirl_strength != 0.0:
+            inv_d = torch.rsqrt(torch.clamp(d2, min=1e-12))
+            tan_x = -ry * inv_d
+            tan_y = rx * inv_d
+            dv_x = dv_x + tan_x * swirl_strength * falloff
+            dv_y = dv_y + tan_y * swirl_strength * falloff
 
-        dv_x = (dir_x * strength + tan_x * swirl_strength) * falloff
-        dv_y = (dir_y * strength + tan_y * swirl_strength) * falloff
-        velocity[:, 0] += dv_x
-        velocity[:, 1] += dv_y
+        velocity[:, 0] += dv_x.sum(dim=1)
+        velocity[:, 1] += dv_y.sum(dim=1)
 
     return velocity
 
@@ -543,7 +576,7 @@ def _simulate_fluid_advection(
     sim_h = max(4, int(round(float(height) * resolution_scale)))
     sim_w = max(4, int(round(float(width) * resolution_scale)))
 
-    generator = torch.Generator(device="cpu").manual_seed(int(seed) & _SEED_MASK_64)
+    generator = torch.Generator(device=field.device).manual_seed(int(seed) & _SEED_MASK_64)
 
     with torch.no_grad():
         if (sim_h, sim_w) != (int(height), int(width)):
@@ -623,6 +656,7 @@ def _simulate_smoke(
     field_injection: Optional[torch.Tensor],
     fade_field: bool,
     progress: Optional[_ProgressBar] = None,
+    return_all_steps: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if field.ndim != 4:
         raise ValueError(f"Expected field shape (B,C,H,W), got {tuple(field.shape)}")
@@ -639,6 +673,7 @@ def _simulate_smoke(
 
     steps = int(steps)
     dt = float(dt)
+    return_all_steps = bool(return_all_steps)
 
     batch, channels, height, width = field.shape
     resolution_scale = float(resolution_scale)
@@ -664,7 +699,7 @@ def _simulate_smoke(
     smoke_source_radius = float(smoke_source_radius)
     temperature_strength = float(temperature_strength)
 
-    generator = torch.Generator(device="cpu").manual_seed(int(seed) & _SEED_MASK_64)
+    generator = torch.Generator(device=field.device).manual_seed(int(seed) & _SEED_MASK_64)
 
     with torch.no_grad():
         if smoke_source_mode in ("image", "mask") and source_density is None:
@@ -708,7 +743,13 @@ def _simulate_smoke(
         fade_mul = 1.0 - density_fade
         cool_mul = 1.0 - cooling_rate
 
+        field_frames = []
+        density_frames = []
+        velocity_frames = []
         for step in range(int(steps)):
+            if return_all_steps and step:
+                velocity = velocity.clone()
+
             if smoke_source_mode == "random":
                 source_step = _random_smoke_source(
                     batch=int(batch),
@@ -768,9 +809,11 @@ def _simulate_smoke(
             velocity = _advect_nchw(velocity, velocity, dt=dt, wrap_mode=wrap_mode, base_grid=base_grid)
             velocity = velocity * velocity_damping
 
-            density = _advect_nchw(density, velocity, dt=dt, wrap_mode=wrap_mode, base_grid=base_grid)
-            temperature = _advect_nchw(temperature, velocity, dt=dt, wrap_mode=wrap_mode, base_grid=base_grid)
-            field_sim = _advect_nchw(field_sim, velocity, dt=dt, wrap_mode=wrap_mode, base_grid=base_grid)
+            advect_pack = torch.cat((density, temperature, field_sim), dim=1)
+            advect_pack = _advect_nchw(advect_pack, velocity, dt=dt, wrap_mode=wrap_mode, base_grid=base_grid)
+            density = advect_pack[:, :1]
+            temperature = advect_pack[:, 1:2]
+            field_sim = advect_pack[:, 2:]
 
             temperature = (temperature * cool_mul).clamp(0.0, float(_TEMPERATURE_CLAMP_MAX))
             density = (density * fade_mul).clamp(0.0, 1.0)
@@ -784,8 +827,18 @@ def _simulate_smoke(
                 density = torch.nan_to_num(density, nan=0.0, posinf=0.0, neginf=0.0).clamp(0.0, 1.0)
                 temperature = torch.nan_to_num(temperature, nan=0.0, posinf=0.0, neginf=0.0).clamp(0.0, float(_TEMPERATURE_CLAMP_MAX))
 
+            if return_all_steps:
+                field_frames.append(field_sim)
+                density_frames.append(density)
+                velocity_frames.append(velocity)
+
             if progress is not None:
                 progress.update(1)
+
+        if return_all_steps:
+            field_sim = torch.cat(field_frames, dim=0)
+            density = torch.cat(density_frames, dim=0)
+            velocity = torch.cat(velocity_frames, dim=0)
 
         if (sim_h, sim_w) != (int(height), int(width)):
             field_out = F.interpolate(field_sim, size=(int(height), int(width)), mode="bilinear", align_corners=False)
@@ -932,6 +985,22 @@ class FluidLatentAdvection:
         if samples.ndim < 3:
             raise ValueError(f"LATENT['samples'] must have at least 3 dims, got {tuple(samples.shape)}.")
 
+        flattened = _flatten_latent_channels(samples)
+        combined = flattened.tensor
+        sample_channels = int(combined.shape[1])
+
+        noise_mask = latent.get("noise_mask")
+        noise_flat: Optional[_FlattenedLatent] = None
+        noise_channels = 0
+        combine_noise_mask = False
+        if isinstance(noise_mask, torch.Tensor):
+            noise_flat = _flatten_latent_channels(noise_mask)
+            if tuple(noise_flat.tensor.shape[0:1] + noise_flat.tensor.shape[2:]) == tuple(combined.shape[0:1] + combined.shape[2:]):
+                noise_tensor_cf = noise_flat.tensor.to(device=combined.device, dtype=combined.dtype)
+                noise_channels = int(noise_tensor_cf.shape[1])
+                combined = torch.cat((combined, noise_tensor_cf), dim=1)
+                combine_noise_mask = True
+
         progress_bar = None
         steps_int = int(steps)
         active_sim = (
@@ -941,14 +1010,11 @@ class FluidLatentAdvection:
             and (float(force_strength) != 0.0 or float(swirl_strength) != 0.0)
         )
         if active_sim:
-            total_passes = 1
-            if "noise_mask" in latent and isinstance(latent["noise_mask"], torch.Tensor):
-                total_passes += 1
+            total_passes = 2 if isinstance(noise_mask, torch.Tensor) and not combine_noise_mask else 1
             progress_bar = _progress_bar(max(1, steps_int * total_passes))
 
-        flattened = _flatten_latent_channels(samples)
         field_out, preview = _simulate_fluid_advection(
-            flattened.tensor,
+            combined,
             steps=int(steps),
             dt=float(dt),
             resolution_scale=float(resolution_scale),
@@ -963,9 +1029,15 @@ class FluidLatentAdvection:
             wrap_mode=str(wrap_mode),
             progress=progress_bar,
         )
-        out_samples = flattened.restore(field_out)
+        out_samples_cf = field_out[:, :sample_channels]
+        out_samples = flattened.restore(out_samples_cf)
+        advected_noise_mask = None
+        if combine_noise_mask and noise_flat is not None and noise_channels:
+            advected_noise_mask_cf = field_out[:, sample_channels: sample_channels + noise_channels]
+            advected_noise_mask = noise_flat.restore(advected_noise_mask_cf)
 
         out_latent = latent.copy()
+        mask_nchw = None
         if mask is not None:
             if not isinstance(mask, torch.Tensor):
                 raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
@@ -985,36 +1057,31 @@ class FluidLatentAdvection:
 
         out_latent["samples"] = out_samples
 
-        if "noise_mask" in out_latent and isinstance(out_latent["noise_mask"], torch.Tensor):
-            noise_mask = out_latent["noise_mask"]
-            flattened_mask = _flatten_latent_channels(noise_mask)
-            advected_mask, _ = _simulate_fluid_advection(
-                flattened_mask.tensor.to(device=samples.device),
-                steps=int(steps),
-                dt=float(dt),
-                resolution_scale=float(resolution_scale),
-                force_count=int(force_count),
-                force_strength=float(force_strength),
-                force_radius=float(force_radius),
-                swirl_strength=float(swirl_strength),
-                velocity_damping=float(velocity_damping),
-                diffusion=float(diffusion),
-                vorticity=float(vorticity),
-                seed=int(seed),
-                wrap_mode=str(wrap_mode),
-                progress=progress_bar,
-            )
-            advected_mask = flattened_mask.restore(advected_mask)
-            if mask is not None:
-                mask_nchw = prepare_mask_nchw(
-                    mask,
-                    batch_size=int(noise_mask.shape[0]),
-                    height=int(noise_mask.shape[-2]),
-                    width=int(noise_mask.shape[-1]),
-                    device=samples.device,
+        if isinstance(noise_mask, torch.Tensor):
+            if advected_noise_mask is None:
+                noise_flat = _flatten_latent_channels(noise_mask)
+                advected_mask_cf, _ = _simulate_fluid_advection(
+                    noise_flat.tensor.to(device=samples.device),
+                    steps=int(steps),
+                    dt=float(dt),
+                    resolution_scale=float(resolution_scale),
+                    force_count=int(force_count),
+                    force_strength=float(force_strength),
+                    force_radius=float(force_radius),
+                    swirl_strength=float(swirl_strength),
+                    velocity_damping=float(velocity_damping),
+                    diffusion=float(diffusion),
+                    vorticity=float(vorticity),
+                    seed=int(seed),
+                    wrap_mode=str(wrap_mode),
+                    progress=progress_bar,
                 )
-                advected_mask = blend_with_mask(noise_mask, advected_mask, mask_nchw)
-            out_latent["noise_mask"] = advected_mask.clamp(0.0, 1.0).to(dtype=noise_mask.dtype)
+                advected_noise_mask = noise_flat.restore(advected_mask_cf)
+
+            if mask_nchw is not None:
+                advected_noise_mask = blend_with_mask(noise_mask, advected_noise_mask, mask_nchw)
+
+            out_latent["noise_mask"] = advected_noise_mask.clamp(0.0, 1.0).to(dtype=noise_mask.dtype)
 
         return (out_latent, preview)
 
@@ -1229,7 +1296,16 @@ class LatentSmokeSimulation:
         return {
             "required": {
                 "latent": ("LATENT", {"tooltip": "Latent to simulate as smoke (buoyancy-driven advection)."}),
-                "steps": ("INT", {"default": 30, "min": 0, "max": 256, "tooltip": "Number of simulation steps."}),
+                "steps": ("INT", {
+                    "default": 30,
+                    "min": 0,
+                    "max": 256,
+                    "tooltip": "Number of simulation steps (or batch size when output_mode='batch').",
+                }),
+                "output_mode": (list(_SMOKE_OUTPUT_MODES), {
+                    "default": "final",
+                    "tooltip": "When 'batch', returns a batch of intermediate outputs after each step (1..steps).",
+                }),
                 "dt": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01, "round": 0.001, "tooltip": "Time step size used during advection."}),
                 "resolution_scale": ("FLOAT", {
                     "default": 0.5,
@@ -1384,6 +1460,7 @@ class LatentSmokeSimulation:
         smoke_source_mode: str,
         seed: int,
         wrap_mode: str,
+        output_mode: str = "final",
         mask=None,
     ):
         if not isinstance(latent, dict) or "samples" not in latent:
@@ -1392,6 +1469,10 @@ class LatentSmokeSimulation:
         samples = latent["samples"]
         if not isinstance(samples, torch.Tensor):
             raise ValueError(f"LATENT['samples'] must be a torch.Tensor, got {type(samples)}.")
+
+        output_mode = str(output_mode).strip().lower()
+        if output_mode not in _SMOKE_OUTPUT_MODES:
+            raise ValueError(f"Unsupported output_mode '{output_mode}'. Supported: {_SMOKE_OUTPUT_MODES}")
 
         progress_bar = None
         steps_int = int(steps)
@@ -1427,6 +1508,7 @@ class LatentSmokeSimulation:
                 device=samples.device,
             )
 
+        return_all_steps = output_mode == "batch" and steps_int > 0
         combined_out, density_out, velocity_preview = _simulate_smoke(
             combined,
             steps=int(steps),
@@ -1453,6 +1535,7 @@ class LatentSmokeSimulation:
             field_injection=None,
             fade_field=False,
             progress=progress_bar,
+            return_all_steps=return_all_steps,
         )
 
         samples_adv_cf = combined_out[:, :sample_channels]
@@ -1460,14 +1543,50 @@ class LatentSmokeSimulation:
 
         samples_adv = samples_flat.restore(samples_adv_cf)
         density_mask = density_out
-        samples_out = blend_with_mask(samples, samples_adv, density_mask)
+        if return_all_steps:
+            frames = steps_int
+            batch = int(samples.shape[0])
+            if int(samples_adv.shape[0]) != frames * batch:
+                raise ValueError(
+                    f"Unexpected output batch size {int(samples_adv.shape[0])}; expected {frames * batch} for steps={frames} batch={batch}."
+                )
+            samples_steps = samples_adv.reshape(frames, batch, *samples_adv.shape[1:])
+            density_steps = density_mask.reshape(frames, batch, *density_mask.shape[1:])
+            base_steps = samples.unsqueeze(0)
+            if samples.ndim == 3:
+                mask_steps = density_steps.squeeze(2)
+            else:
+                mask_steps = density_steps
+                for _ in range(samples.ndim - 4):
+                    mask_steps = mask_steps.unsqueeze(3)
+            mask_steps = mask_steps.to(dtype=samples.dtype)
+            out_steps = base_steps * (1.0 - mask_steps) + samples_steps.to(dtype=samples.dtype) * mask_steps
+            samples_out = out_steps.reshape(frames * batch, *samples.shape[1:])
+        else:
+            samples_out = blend_with_mask(samples, samples_adv, density_mask)
 
         out_latent = latent.copy()
         out_latent["samples"] = samples_out
 
         if noise_flat is not None and noise_adv_cf is not None:
             noise_adv = noise_flat.restore(noise_adv_cf)
-            noise_out = blend_with_mask(noise_mask, noise_adv, density_mask)  # type: ignore[arg-type]
+            if return_all_steps:
+                frames = steps_int
+                batch = int(noise_adv.shape[0]) // frames if frames else int(noise_adv.shape[0])
+                noise_steps = noise_adv.reshape(frames, batch, *noise_adv.shape[1:])
+                density_steps = density_mask.reshape(frames, batch, *density_mask.shape[1:])
+                base_steps = noise_mask.unsqueeze(0)  # type: ignore[union-attr]
+                if noise_mask.ndim == 3:  # type: ignore[union-attr]
+                    mask_steps = density_steps.squeeze(2)
+                else:
+                    mask_steps = density_steps
+                    for _ in range(noise_mask.ndim - 4):  # type: ignore[union-attr]
+                        mask_steps = mask_steps.unsqueeze(3)
+                mask_steps = mask_steps.to(dtype=noise_mask.dtype)  # type: ignore[union-attr]
+                out_steps = base_steps * (1.0 - mask_steps) + noise_steps.to(dtype=noise_mask.dtype) * mask_steps  # type: ignore[union-attr]
+                noise_out = out_steps.reshape(frames * batch, *noise_mask.shape[1:])  # type: ignore[union-attr]
+            else:
+                noise_out = blend_with_mask(noise_mask, noise_adv, density_mask)  # type: ignore[arg-type]
             out_latent["noise_mask"] = noise_out.clamp(0.0, 1.0).to(dtype=noise_mask.dtype)  # type: ignore[union-attr]
 
         density_preview = density_out.permute(0, 2, 3, 1).repeat(1, 1, 1, 3)
@@ -1491,7 +1610,16 @@ class ImageSmokeSimulation:
         return {
             "required": {
                 "image": ("IMAGE", {"tooltip": "Image to simulate as smoke density/color."}),
-                "steps": ("INT", {"default": 30, "min": 0, "max": 256, "tooltip": "Number of simulation steps."}),
+                "steps": ("INT", {
+                    "default": 30,
+                    "min": 0,
+                    "max": 256,
+                    "tooltip": "Number of simulation steps (or batch size when output_mode='batch').",
+                }),
+                "output_mode": (list(_SMOKE_OUTPUT_MODES), {
+                    "default": "final",
+                    "tooltip": "When 'batch', returns a batch of intermediate outputs after each step (1..steps).",
+                }),
                 "dt": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01, "round": 0.001, "tooltip": "Time step size used during advection."}),
                 "resolution_scale": ("FLOAT", {"default": 0.5, "min": 0.25, "max": 1.0, "step": 0.01, "round": 0.001, "tooltip": "Internal simulation resolution scale (lower = faster)."}),
                 "force_count": ("INT", {
@@ -1548,10 +1676,18 @@ class ImageSmokeSimulation:
         smoke_source_mode: str,
         seed: int,
         wrap_mode: str,
+        output_mode: str = "final",
         mask=None,
     ):
         if not isinstance(image, torch.Tensor):
             raise ValueError(f"IMAGE input must be a torch.Tensor, got {type(image)}.")
+
+        output_mode = str(output_mode).strip().lower()
+        if output_mode not in _SMOKE_OUTPUT_MODES:
+            raise ValueError(f"Unsupported output_mode '{output_mode}'. Supported: {_SMOKE_OUTPUT_MODES}")
+
+        steps_int = int(steps)
+        return_all_steps = output_mode == "batch" and steps_int > 0
 
         if image.ndim == 3 and int(image.shape[-1]) in (1, 3, 4):
             (out_image, out_density, out_velocity) = self.run(
@@ -1576,15 +1712,17 @@ class ImageSmokeSimulation:
                 smoke_source_mode=smoke_source_mode,
                 seed=seed,
                 wrap_mode=wrap_mode,
+                output_mode=output_mode,
                 mask=mask,
             )
+            if return_all_steps:
+                return (out_image, out_density, out_velocity)
             return (out_image.squeeze(0), out_density.squeeze(0), out_velocity.squeeze(0))
 
         if image.ndim != 4 or int(image.shape[-1]) not in (1, 3, 4):
             raise ValueError(f"Expected IMAGE tensor with shape (B,H,W,C), got {tuple(image.shape)}")
 
         progress_bar = None
-        steps_int = int(steps)
         if steps_int > 0:
             progress_bar = _progress_bar(max(1, steps_int))
 
@@ -1633,6 +1771,7 @@ class ImageSmokeSimulation:
             field_injection=image_cf,
             fade_field=True,
             progress=progress_bar,
+            return_all_steps=return_all_steps,
         )
 
         out = out_cf.permute(0, 2, 3, 1).clamp(0.0, 1.0).to(dtype=image.dtype)

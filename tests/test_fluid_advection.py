@@ -326,3 +326,131 @@ def test_smoke_image_simulation_preserves_shape_and_is_deterministic():
     assert torch.allclose(out1, out2)
     assert torch.allclose(density1, density2)
     assert torch.allclose(vel1, vel2)
+
+
+def test_smoke_image_simulation_can_return_step_batch():
+    image = torch.linspace(0.0, 1.0, 16 * 16, dtype=torch.float32).reshape(2, 16, 16, 1).repeat(1, 1, 1, 3)
+    steps = 4
+
+    node = ImageSmokeSimulation()
+    out_batch, density_batch, vel_batch = node.run(
+        image,
+        steps=steps,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=6.0,
+        force_radius=0.2,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.3,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="image",
+        seed=7,
+        wrap_mode="wrap",
+        output_mode="batch",
+    )
+    out_final, density_final, vel_final = node.run(
+        image,
+        steps=steps,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=6.0,
+        force_radius=0.2,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.3,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="image",
+        seed=7,
+        wrap_mode="wrap",
+    )
+
+    assert out_batch.shape == (int(image.shape[0]) * steps, 16, 16, 3)
+    assert density_batch.shape == (int(image.shape[0]) * steps, 16, 16, 3)
+    assert vel_batch.shape == (int(image.shape[0]) * steps, 16, 16, 3)
+    assert torch.allclose(out_batch[-int(image.shape[0]):], out_final)
+    assert torch.allclose(density_batch[-int(image.shape[0]):], density_final)
+    assert torch.allclose(vel_batch[-int(image.shape[0]):], vel_final)
+
+
+def test_smoke_latent_simulation_can_return_step_batch():
+    base = torch.linspace(0.0, 1.0, 16 * 16, dtype=torch.float32).reshape(2, 1, 16, 16)
+    samples = base.repeat(1, 4, 1, 1)
+    noise_mask = base.squeeze(1)
+    latent = {"samples": samples, "noise_mask": noise_mask}
+    steps = 5
+
+    node = LatentSmokeSimulation()
+    out_batch, density_batch, vel_batch = node.run(
+        latent,
+        steps=steps,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=4.0,
+        force_radius=0.25,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.6,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="image",
+        seed=123,
+        wrap_mode="mirror",
+        output_mode="batch",
+    )
+    out_final, density_final, vel_final = node.run(
+        latent,
+        steps=steps,
+        dt=1.0,
+        resolution_scale=1.0,
+        force_count=3,
+        force_strength=4.0,
+        force_radius=0.25,
+        swirl_strength=2.0,
+        velocity_damping=0.98,
+        diffusion=0.0,
+        vorticity=0.6,
+        buoyancy=1.5,
+        ambient_updraft=0.1,
+        density_fade=0.01,
+        temperature_strength=0.0,
+        cooling_rate=0.05,
+        smoke_source_strength=1.0,
+        smoke_source_radius=0.1,
+        smoke_source_mode="image",
+        seed=123,
+        wrap_mode="mirror",
+    )
+
+    assert out_batch["samples"].shape == (int(samples.shape[0]) * steps, 4, 16, 16)
+    assert out_batch["noise_mask"].shape == (int(samples.shape[0]) * steps, 16, 16)
+    assert density_batch.shape == (int(samples.shape[0]) * steps, 16, 16, 3)
+    assert vel_batch.shape == (int(samples.shape[0]) * steps, 16, 16, 3)
+    assert torch.allclose(out_batch["samples"][-int(samples.shape[0]):], out_final["samples"])
+    assert torch.allclose(out_batch["noise_mask"][-int(samples.shape[0]):], out_final["noise_mask"])
+    assert torch.allclose(density_batch[-int(samples.shape[0]):], density_final)
+    assert torch.allclose(vel_batch[-int(samples.shape[0]):], vel_final)
+    assert torch.allclose(out_batch["noise_mask"], out_batch["samples"][:, 0], atol=1e-5)
