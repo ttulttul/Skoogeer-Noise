@@ -28,21 +28,19 @@ def _storage_dtype(samples: torch.Tensor) -> torch.dtype:
 
 class SplitLatentPhaseMagnitude:
     """
-    Converts a spatial latent into a packed frequency latent.
-
-    Output packing: channels [0:C] = magnitude, channels [C:2C] = phase (radians).
+    Converts a spatial latent into two frequency-domain latents: magnitude and phase.
     """
 
     CATEGORY = "latent/frequency"
-    RETURN_TYPES = ("LATENT",)
-    RETURN_NAMES = ("frequency_latent",)
+    RETURN_TYPES = ("LATENT", "LATENT")
+    RETURN_NAMES = ("MAGNITUDE", "PHASE")
     FUNCTION = "split"
 
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "latent": ("LATENT", {"tooltip": "Spatial latent to transform into packed frequency (magnitude+phase)."}),
+                "latent": ("LATENT", {"tooltip": "Spatial latent to transform into frequency magnitude + phase latents."}),
             }
         }
 
@@ -60,16 +58,19 @@ class SplitLatentPhaseMagnitude:
 
             magnitude = torch.abs(freq).to(dtype=out_dtype)
             phase = torch.angle(freq).to(dtype=out_dtype)
-            packed = torch.cat((magnitude, phase), dim=1)
 
-        out = latent.copy()
-        out["samples"] = packed
-        return (out,)
+        magnitude_latent = latent.copy()
+        magnitude_latent["samples"] = magnitude
+
+        phase_latent = latent.copy()
+        phase_latent["samples"] = phase
+
+        return (magnitude_latent, phase_latent)
 
 
 class CombineLatentPhaseMagnitude:
     """
-    Converts a packed frequency latent (magnitude+phase) back into a spatial latent.
+    Converts magnitude + phase frequency-domain latents back into a spatial latent.
     """
 
     CATEGORY = "latent/frequency"
@@ -81,23 +82,28 @@ class CombineLatentPhaseMagnitude:
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "frequency_latent": ("LATENT", {"tooltip": "Packed frequency latent from SplitLatentPhaseMagnitude."}),
+                "MAGNITUDE": ("LATENT", {"tooltip": "Magnitude latent from SplitLatentPhaseMagnitude."}),
+                "PHASE": ("LATENT", {"tooltip": "Phase latent from SplitLatentPhaseMagnitude."}),
             }
         }
 
-    def combine(self, frequency_latent):
-        frequency_latent = _validate_latent(frequency_latent, name="frequency_latent")
-        packed: torch.Tensor = frequency_latent["samples"]
+    def combine(self, MAGNITUDE, PHASE):
+        magnitude_latent = _validate_latent(MAGNITUDE, name="MAGNITUDE")
+        phase_latent = _validate_latent(PHASE, name="PHASE")
 
-        total_channels = int(packed.shape[1])
-        if total_channels % 2 != 0:
+        magnitude: torch.Tensor = magnitude_latent["samples"]
+        phase: torch.Tensor = phase_latent["samples"]
+        if tuple(magnitude.shape) != tuple(phase.shape):
             raise ValueError(
-                f"frequency_latent['samples'] must have an even channel count (magnitude+phase), got C={total_channels}."
+                "MAGNITUDE['samples'] and PHASE['samples'] must have the same shape, "
+                f"got {tuple(magnitude.shape)} vs {tuple(phase.shape)}."
+            )
+        if magnitude.device != phase.device:
+            raise ValueError(
+                f"MAGNITUDE and PHASE must be on the same device, got {magnitude.device} vs {phase.device}."
             )
 
-        out_dtype = _storage_dtype(packed)
-
-        magnitude, phase = torch.chunk(packed, 2, dim=1)
+        out_dtype = _storage_dtype(magnitude)
 
         with torch.no_grad():
             try:
@@ -109,7 +115,7 @@ class CombineLatentPhaseMagnitude:
 
             spatial = spatial_complex.real.to(dtype=out_dtype)
 
-        out = frequency_latent.copy()
+        out = magnitude_latent.copy()
         out["samples"] = spatial
         return (out,)
 
@@ -123,4 +129,3 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SplitLatentPhaseMagnitude": "Split Latent (FFT Mag/Phase)",
     "CombineLatentPhaseMagnitude": "Combine Latent (IFFT Mag/Phase)",
 }
-

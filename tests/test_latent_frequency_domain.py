@@ -14,16 +14,18 @@ from src.latent_frequency_domain import (  # noqa: E402
 )
 
 
-def test_split_doubles_channel_count_and_preserves_keys():
+def test_split_outputs_magnitude_and_phase_and_preserves_keys():
     samples = torch.randn(1, 4, 8, 8, dtype=torch.float32)
     noise_mask = torch.rand(1, 8, 8, dtype=torch.float32)
     latent = {"samples": samples, "noise_mask": noise_mask}
 
     node = SplitLatentPhaseMagnitude()
-    (freq_latent,) = node.split(latent)
+    magnitude_latent, phase_latent = node.split(latent)
 
-    assert freq_latent["samples"].shape == (1, 8, 8, 8)
-    assert torch.equal(freq_latent["noise_mask"], noise_mask)
+    assert magnitude_latent["samples"].shape == samples.shape
+    assert phase_latent["samples"].shape == samples.shape
+    assert torch.equal(magnitude_latent["noise_mask"], noise_mask)
+    assert torch.equal(phase_latent["noise_mask"], noise_mask)
 
 
 def test_split_then_combine_roundtrips_latent_samples():
@@ -34,17 +36,16 @@ def test_split_then_combine_roundtrips_latent_samples():
     split_node = SplitLatentPhaseMagnitude()
     combine_node = CombineLatentPhaseMagnitude()
 
-    (freq_latent,) = split_node.split(latent)
-    (out_latent,) = combine_node.combine(freq_latent)
+    magnitude_latent, phase_latent = split_node.split(latent)
+    (out_latent,) = combine_node.combine(magnitude_latent, phase_latent)
 
     assert torch.allclose(out_latent["samples"], samples, atol=1e-5, rtol=1e-5)
 
 
-def test_combine_rejects_odd_channel_count():
-    packed = torch.randn(1, 5, 8, 8, dtype=torch.float32)
-    freq_latent = {"samples": packed}
+def test_combine_rejects_mismatched_shapes():
+    magnitude_latent = {"samples": torch.randn(1, 4, 8, 8, dtype=torch.float32)}
+    phase_latent = {"samples": torch.randn(1, 4, 8, 9, dtype=torch.float32)}
 
     node = CombineLatentPhaseMagnitude()
     with pytest.raises(ValueError):
-        node.combine(freq_latent)
-
+        node.combine(magnitude_latent, phase_latent)
