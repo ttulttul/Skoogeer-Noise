@@ -4,6 +4,8 @@ from typing import Dict
 
 import torch
 
+_SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
+
 
 def _validate_latent(latent: object, *, name: str) -> Dict:
     if not isinstance(latent, dict) or "samples" not in latent:
@@ -120,12 +122,112 @@ class CombineLatentPhaseMagnitude:
         return (out,)
 
 
+class FrequencySelectiveStructuredNoise:
+    """
+    Generates frequency-domain structured noise using a reference phase latent.
+
+    The output magnitude is taken entirely from random Gaussian noise (FFT magnitude).
+    The output phase is mixed between the reference phase and noise phase using a radial frequency mask.
+    """
+
+    CATEGORY = "latent/frequency"
+    RETURN_TYPES = ("LATENT", "LATENT")
+    RETURN_NAMES = ("magnitude_latent_noise", "phase_latent_noise")
+    FUNCTION = "generate_fss_noise"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "phase_latent_ref": ("LATENT", {"tooltip": "Reference phase latent (from SplitLatentPhaseMagnitude)."}),
+                "cutoff_radius_r": ("INT", {
+                    "default": 16,
+                    "min": 0,
+                    "max": 512,
+                    "step": 1,
+                    "tooltip": "Frequency radius below which the reference phase is preserved.",
+                }),
+                "sigma": ("FLOAT", {
+                    "default": 2.0,
+                    "min": 0.1,
+                    "max": 10.0,
+                    "step": 0.1,
+                    "round": 0.1,
+                    "tooltip": "Smoothness of the cutoff transition (higher = smoother).",
+                }),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": _SEED_MASK_64,
+                    "tooltip": "Seed for reproducible noise generation.",
+                }),
+            }
+        }
+
+    def generate_fss_noise(self, phase_latent_ref, cutoff_radius_r: int, sigma: float, seed: int):
+        phase_latent_ref = _validate_latent(phase_latent_ref, name="phase_latent_ref")
+        phase_ref: torch.Tensor = phase_latent_ref["samples"]
+
+        out_dtype = _storage_dtype(phase_ref)
+        batch, channels, height, width = phase_ref.shape
+
+        cutoff_radius_r = int(cutoff_radius_r)
+        sigma = float(sigma)
+        seed = int(seed)
+
+        with torch.no_grad():
+            generator = torch.Generator(device="cpu").manual_seed(seed & _SEED_MASK_64)
+            spatial_noise = torch.randn(
+                (batch, channels, height, width),
+                generator=generator,
+                device="cpu",
+                dtype=torch.float32,
+            )
+            if spatial_noise.device != phase_ref.device:
+                spatial_noise = spatial_noise.to(device=phase_ref.device)
+            spatial_noise = spatial_noise.to(dtype=out_dtype)
+
+            try:
+                complex_noise_freq = torch.fft.fft2(spatial_noise, dim=(-2, -1))
+            except RuntimeError:
+                complex_noise_freq = torch.fft.fft2(spatial_noise.float(), dim=(-2, -1))
+
+            magnitude_noise = torch.abs(complex_noise_freq).to(dtype=out_dtype)
+            phase_noise = torch.angle(complex_noise_freq).to(dtype=out_dtype)
+
+            coord_dtype = torch.float32
+            u = torch.arange(height, device=phase_ref.device, dtype=coord_dtype) - (height // 2)
+            v = torch.arange(width, device=phase_ref.device, dtype=coord_dtype) - (width // 2)
+            u_grid, v_grid = torch.meshgrid(u, v, indexing="ij")
+            radius_grid = torch.sqrt(u_grid * u_grid + v_grid * v_grid)
+
+            cutoff = float(cutoff_radius_r)
+            sigma_safe = max(sigma, 1e-6)
+            decay = torch.exp(-torch.square(radius_grid - cutoff) / (2.0 * sigma_safe * sigma_safe))
+            mask_centered = torch.where(radius_grid <= cutoff, torch.ones_like(radius_grid), decay)
+            mask = torch.fft.ifftshift(mask_centered, dim=(-2, -1)).to(dtype=out_dtype)
+            mask = mask.unsqueeze(0).unsqueeze(0)
+
+            phase_ref_out = phase_ref.to(dtype=out_dtype)
+            mixed_phase = phase_ref_out * mask + phase_noise * (mask.new_tensor(1.0) - mask)
+
+        magnitude_latent = phase_latent_ref.copy()
+        magnitude_latent["samples"] = magnitude_noise
+
+        phase_latent = phase_latent_ref.copy()
+        phase_latent["samples"] = mixed_phase
+
+        return (magnitude_latent, phase_latent)
+
+
 NODE_CLASS_MAPPINGS = {
     "SplitLatentPhaseMagnitude": SplitLatentPhaseMagnitude,
     "CombineLatentPhaseMagnitude": CombineLatentPhaseMagnitude,
+    "FrequencySelectiveStructuredNoise": FrequencySelectiveStructuredNoise,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SplitLatentPhaseMagnitude": "Split Latent (FFT Mag/Phase)",
     "CombineLatentPhaseMagnitude": "Combine Latent (IFFT Mag/Phase)",
+    "FrequencySelectiveStructuredNoise": "Frequency-Selective Structured Noise (FSS)",
 }

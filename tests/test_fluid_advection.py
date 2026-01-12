@@ -140,7 +140,7 @@ def test_fluid_latent_advection_mask_limits_effect_region():
 
     out_samples = out_latent["samples"]
     assert out_samples.shape == samples.shape
-    outside = mask.unsqueeze(1) < 0.5
+    outside = (mask.unsqueeze(1) < 0.5).expand_as(out_samples)
     assert torch.allclose(out_samples[outside], samples[outside], atol=1e-6)
     assert not torch.allclose(out_samples, samples)
 
@@ -329,7 +329,11 @@ def test_smoke_image_simulation_preserves_shape_and_is_deterministic():
 
 
 def test_smoke_image_simulation_can_return_step_batch():
-    image = torch.linspace(0.0, 1.0, 16 * 16, dtype=torch.float32).reshape(2, 16, 16, 1).repeat(1, 1, 1, 3)
+    image = (
+        torch.linspace(0.0, 1.0, 2 * 16 * 16, dtype=torch.float32)
+        .reshape(2, 16, 16, 1)
+        .repeat(1, 1, 1, 3)
+    )
     steps = 4
 
     node = ImageSmokeSimulation()
@@ -390,7 +394,7 @@ def test_smoke_image_simulation_can_return_step_batch():
 
 
 def test_smoke_latent_simulation_can_return_step_batch():
-    base = torch.linspace(0.0, 1.0, 16 * 16, dtype=torch.float32).reshape(2, 1, 16, 16)
+    base = torch.linspace(0.0, 1.0, 2 * 16 * 16, dtype=torch.float32).reshape(2, 1, 16, 16)
     samples = base.repeat(1, 4, 1, 1)
     noise_mask = base.squeeze(1)
     latent = {"samples": samples, "noise_mask": noise_mask}
