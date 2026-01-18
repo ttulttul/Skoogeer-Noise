@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-skoogeer-noise"
 description = "Noise, conditioning, and perturbation utility nodes for ComfyUI (procedural noise, mesh drag, latent channel stats preview)."
-dependencies = ["numpy>=2.0", "torch>=2.1"]
+dependencies = ["numpy>=2.0", "torch>=2.1", "einops>=0.7"]
 version = "1.2.5"
 license = "MIT"
 classifiers = [

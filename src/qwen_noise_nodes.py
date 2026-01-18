@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 from typing import Any, Dict, Optional
 
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 
 try:
     from .masking import blend_image_with_mask, blend_with_mask, prepare_mask_nchw
@@ -25,6 +27,8 @@ except ModuleNotFoundError:  # pragma: no cover - comfy is only available inside
     comfy_model_management = None
     comfy_samplers = None
     comfy_utils = None
+
+logger = logging.getLogger(__name__)
 
 
 def _get_device() -> torch.device:
@@ -878,6 +882,159 @@ def _swirl_grid(base_y, base_x, vortices):
     y_new = base_y + total_dy
     grid = torch.stack((x_new, y_new), dim=-1)
     return torch.clamp(grid, -1.0, 1.0)
+
+_FLUX_BASE_CHANNELS = 32
+_FLUX_PATCH_SIZE = (2, 2)
+
+
+def _parse_patch_size(patch_size):
+    if not isinstance(patch_size, (tuple, list)) or len(patch_size) != 2:
+        raise ValueError("patch_size must be a tuple/list of length 2.")
+    try:
+        pi = int(patch_size[0])
+        pj = int(patch_size[1])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("patch_size values must be integers.") from exc
+    if pi <= 0 or pj <= 0:
+        raise ValueError("patch_size values must be positive.")
+    return pi, pj
+
+
+def _flux_unpatchify(z, patch_size=(2, 2)):
+    """(B, 128, H, W) -> (B, 32, H*2, W*2)"""
+    if z.dim() != 4:
+        raise ValueError("Flux unpatchify expects a 4D tensor shaped (B, C, H, W).")
+    pi, pj = _parse_patch_size(patch_size)
+    expected_channels = _FLUX_BASE_CHANNELS * pi * pj
+    channels = z.shape[1]
+    if channels != expected_channels:
+        raise ValueError(
+            f"Flux unpatchify expects {expected_channels} channels (got {channels})."
+        )
+    return rearrange(z, "... (c pi pj) i j -> ... c (i pi) (j pj)", pi=pi, pj=pj)
+
+
+def _flux_patchify(z, patch_size=(2, 2)):
+    """(B, 32, H, W) -> (B, 128, H//2, W//2)"""
+    if z.dim() != 4:
+        raise ValueError("Flux patchify expects a 4D tensor shaped (B, C, H, W).")
+    pi, pj = _parse_patch_size(patch_size)
+    channels = z.shape[1]
+    if channels != _FLUX_BASE_CHANNELS:
+        raise ValueError(
+            f"Flux patchify expects {_FLUX_BASE_CHANNELS} channels (got {channels})."
+        )
+    height, width = z.shape[2], z.shape[3]
+    if height % pi != 0 or width % pj != 0:
+        raise ValueError(
+            "Flux patchify expects height/width divisible by the patch size "
+            f"(got height={height}, width={width}, patch={pi}x{pj})."
+        )
+    return rearrange(z, "... c (i pi) (j pj) -> ... (c pi pj) i j", pi=pi, pj=pj)
+
+
+def _apply_flux_unpatchify(samples: torch.Tensor, patch_size=_FLUX_PATCH_SIZE) -> torch.Tensor:
+    if not isinstance(samples, torch.Tensor):
+        raise TypeError(f"Expected torch.Tensor for latent samples, got {type(samples)}.")
+
+    if samples.dim() == 4:
+        logger.debug("Flux unpatchify input shape=%s", tuple(samples.shape))
+        result = _flux_unpatchify(samples, patch_size=patch_size)
+        logger.debug("Flux unpatchify output shape=%s", tuple(result.shape))
+        return result
+
+    if samples.dim() == 5:
+        batch, channels, frames, height, width = samples.shape
+        logger.debug("Flux unpatchify video input shape=%s", tuple(samples.shape))
+        working = samples.permute(0, 2, 1, 3, 4).reshape(batch * frames, channels, height, width)
+        result = _flux_unpatchify(working, patch_size=patch_size)
+        _, new_channels, new_height, new_width = result.shape
+        result = result.reshape(batch, frames, new_channels, new_height, new_width).permute(0, 2, 1, 3, 4)
+        logger.debug("Flux unpatchify video output shape=%s", tuple(result.shape))
+        return result
+
+    raise ValueError("Flux unpatchify expects latent samples with 4 or 5 dimensions.")
+
+
+def _apply_flux_patchify(samples: torch.Tensor, patch_size=_FLUX_PATCH_SIZE) -> torch.Tensor:
+    if not isinstance(samples, torch.Tensor):
+        raise TypeError(f"Expected torch.Tensor for latent samples, got {type(samples)}.")
+
+    if samples.dim() == 4:
+        logger.debug("Flux patchify input shape=%s", tuple(samples.shape))
+        result = _flux_patchify(samples, patch_size=patch_size)
+        logger.debug("Flux patchify output shape=%s", tuple(result.shape))
+        return result
+
+    if samples.dim() == 5:
+        batch, channels, frames, height, width = samples.shape
+        logger.debug("Flux patchify video input shape=%s", tuple(samples.shape))
+        working = samples.permute(0, 2, 1, 3, 4).reshape(batch * frames, channels, height, width)
+        result = _flux_patchify(working, patch_size=patch_size)
+        _, new_channels, new_height, new_width = result.shape
+        result = result.reshape(batch, frames, new_channels, new_height, new_width).permute(0, 2, 1, 3, 4)
+        logger.debug("Flux patchify video output shape=%s", tuple(result.shape))
+        return result
+
+    raise ValueError("Flux patchify expects latent samples with 4 or 5 dimensions.")
+
+
+class UnpatchifyFlux2Latent:
+    """Converts Flux.2 patchified latents to their unpatchified 2x spatial form."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT", {"tooltip": "Flux.2 latent to unpatchify from 2x2 patch format."}),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "unpatchify"
+    CATEGORY = "Latent/Flux"
+
+    def unpatchify(self, latent):
+        samples = latent["samples"]
+        if not isinstance(samples, torch.Tensor):
+            raise TypeError(f"LATENT samples must be a torch.Tensor, got {type(samples)}.")
+
+        device = _get_device()
+        working = samples.clone().to(device)
+        result = _apply_flux_unpatchify(working, patch_size=_FLUX_PATCH_SIZE)
+
+        out = latent.copy()
+        out["samples"] = result.cpu()
+        return (out,)
+
+
+class PatchifyFlux2Latent:
+    """Converts unpatchified Flux.2 latents back to the 2x2 patchified format."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT", {"tooltip": "Unpatchified Flux.2 latent to patchify back to 2x2 format."}),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "patchify"
+    CATEGORY = "Latent/Flux"
+
+    def patchify(self, latent):
+        samples = latent["samples"]
+        if not isinstance(samples, torch.Tensor):
+            raise TypeError(f"LATENT samples must be a torch.Tensor, got {type(samples)}.")
+
+        device = _get_device()
+        working = samples.clone().to(device)
+        result = _apply_flux_patchify(working, patch_size=_FLUX_PATCH_SIZE)
+
+        out = latent.copy()
+        out["samples"] = result.cpu()
+        return (out,)
 
 
 class LatentGaussianBlur:
@@ -2804,6 +2961,8 @@ class ConditioningScale:
 
 
 NODE_CLASS_MAPPINGS: Dict[str, Any] = {
+    "UnpatchifyFlux2Latent": UnpatchifyFlux2Latent,
+    "PatchifyFlux2Latent": PatchifyFlux2Latent,
     "LatentGaussianBlur": LatentGaussianBlur,
     "LatentFrequencySplit": LatentFrequencySplit,
     "LatentFrequencyMerge": LatentFrequencyMerge,
@@ -2830,6 +2989,8 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
+    "UnpatchifyFlux2Latent": "Unpatchify Flux.2 Latent",
+    "PatchifyFlux2Latent": "Patchify Flux.2 Latent",
     "LatentGaussianBlur": "Latent Gaussian Blur",
     "LatentFrequencySplit": "Latent Frequency Split",
     "LatentFrequencyMerge": "Latent Frequency Merge",

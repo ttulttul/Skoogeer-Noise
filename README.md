@@ -15,7 +15,7 @@ This pack was extracted from `ComfyUI-FlowMatching-Upscaler` and also includes t
 1. Clone into `ComfyUI/custom_nodes/Skoogeer-Noise`
 2. Restart ComfyUI
 
-Dependencies: `torch` and `numpy` (ComfyUI typically already includes these).
+Dependencies: `torch`, `numpy`, and `einops` (ComfyUI typically already includes torch/numpy).
 
 ## Data types / shapes
 
@@ -83,6 +83,8 @@ ComfyUI conditioning is a list of `[embedding, metadata]` entries. The condition
 | `Latent Swirl Noise` | `Latent/Noise` | `LATENT` |
 | `Image Swirl Noise` | `Image/Noise` | `IMAGE` |
 | `Forward Diffusion (Add Scheduled Noise)` | `Latent/Noise` | `LATENT` |
+| `Unpatchify Flux.2 Latent` | `Latent/Flux` | `LATENT` |
+| `Patchify Flux.2 Latent` | `Latent/Flux` | `LATENT` |
 | `Conditioning (Add Noise)` | `conditioning/noise` | `CONDITIONING` |
 | `Conditioning (Gaussian Blur)` | `conditioning/filter` | `CONDITIONING` |
 | `Conditioning (Frequency Split)` | `conditioning/filter` | `CONDITIONING` (low), `CONDITIONING` (high) |
