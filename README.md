@@ -28,6 +28,10 @@ ComfyUI latents are dictionaries containing a `"samples"` tensor.
 
 All latent nodes in this pack operate on `latent["samples"]` and preserve other latent dict keys. Most latent nodes accept an optional `mask` input; when provided, the mask is resized to latent resolution (bicubic when downscaling) and the effect is applied only within the mask. `Latent Mesh Drag` also warps `latent["noise_mask"]` when present.
 
+### Flux.2 latents (patchified)
+
+Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel latents at 1/16 spatial resolution. Our latent noise nodes operate on spatial neighborhoods, so applying them directly to patchified latents can introduce 2x2 block artifacts and incorrect spatial correlations. Use `Unpatchify Flux.2 Latent` before running latent noise nodes, then `Patchify Flux.2 Latent` afterward to return to the standard Flux.2 format.
+
 ### `IMAGE`
 
 ComfyUI images are torch tensors in **BHWC** format: `(B, H, W, C)` (usually `C=3`). Some nodes also accept 5D “video” tensors: `(B, T, H, W, C)`.
@@ -611,6 +615,44 @@ Adds “sampler-like” scheduled noise to a clean latent, using the model's sig
 
 - When ComfyUI is available, this node pulls `sigmas` from `comfy.samplers.KSampler(model, steps=...)`. Otherwise it falls back to a simple linear sigma schedule.
 - `noise_strength` is mapped to a start step via `start_step = steps - int(steps * noise_strength)`.
+
+---
+
+### Unpatchify Flux.2 Latent
+
+Converts patchified Flux.2 latents into unpatchified latents with double spatial resolution.
+
+- **Menu category:** `Latent/Flux`
+- **Returns:** `LATENT`
+
+#### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `latent` | `LATENT` | – | – | Flux.2 latent to expand from 128-channel 2x2 patchified form. |
+
+#### Notes
+
+- Use this before latent noise nodes so their spatial operations happen on true neighboring pixels rather than 2x2 patch blocks.
+
+---
+
+### Patchify Flux.2 Latent
+
+Re-patchifies an unpatchified Flux.2 latent back to the standard 2x2 patch format.
+
+- **Menu category:** `Latent/Flux`
+- **Returns:** `LATENT`
+
+#### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `latent` | `LATENT` | – | – | Unpatchified Flux.2 latent to return to 128-channel patchified form. |
+
+#### Notes
+
+- Use this after latent noise nodes to restore the format expected by Flux.2 models and downstream nodes.
 
 ---
 
