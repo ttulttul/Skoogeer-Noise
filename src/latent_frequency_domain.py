@@ -132,14 +132,14 @@ class FrequencySelectiveStructuredNoise:
 
     CATEGORY = "latent/frequency"
     RETURN_TYPES = ("LATENT", "LATENT")
-    RETURN_NAMES = ("magnitude_latent_noise", "phase_latent_noise")
+    RETURN_NAMES = ("MAGNITUDE", "PHASE")
     FUNCTION = "generate_fss_noise"
 
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "phase_latent_ref": ("LATENT", {"tooltip": "Reference phase latent (from SplitLatentPhaseMagnitude)."}),
+                "PHASE": ("LATENT", {"tooltip": "Reference phase latent (from SplitLatentPhaseMagnitude)."}),
                 "cutoff_radius_r": ("INT", {
                     "default": 16,
                     "min": 0,
@@ -164,8 +164,8 @@ class FrequencySelectiveStructuredNoise:
             }
         }
 
-    def generate_fss_noise(self, phase_latent_ref, cutoff_radius_r: int, sigma: float, seed: int):
-        phase_latent_ref = _validate_latent(phase_latent_ref, name="phase_latent_ref")
+    def generate_fss_noise(self, PHASE, cutoff_radius_r: int, sigma: float, seed: int):
+        phase_latent_ref = _validate_latent(PHASE, name="PHASE")
         phase_ref: torch.Tensor = phase_latent_ref["samples"]
 
         out_dtype = _storage_dtype(phase_ref)
