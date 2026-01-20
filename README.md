@@ -69,6 +69,9 @@ ComfyUI conditioning is a list of `[embedding, metadata]` entries. The condition
 | `Latent Noise` | `latent/perturb` | `LATENT` |
 | `Image Noise` | `image/perturb` | `IMAGE` |
 | `Latent Channel Stats Preview` | `latent/debug` | `IMAGE` |
+| `Latent Channel Linear Transform` | `latent/channel` | `LATENT` |
+| `Latent Channel Nonlinear Transform` | `latent/channel` | `LATENT` |
+| `Latent Packed Slot Transform` | `latent/channel` | `LATENT` |
 | `Latent Gaussian Blur` | `Latent/Filter` | `LATENT` |
 | `Latent Frequency Split` | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
 | `Latent Frequency Merge` | `Latent/Filter` | `LATENT` |
@@ -200,6 +203,87 @@ Renders a bar-chart preview of **per-channel mean and standard deviation** for `
 | `latent` | `LATENT` | – | – | Latent to analyze. |
 | `channel_limit` | `INT` | `16` | `1..64` | Number of channels to display. |
 | `height` | `INT` | `256` | `72..1024` | Output image height (layout adjusts automatically). |
+
+---
+
+### Latent Channel Linear Transform
+
+Applies **linear channel-space transforms** (signed permutations, orthogonal rotations, Householder reflections, low-rank shears).
+
+- **Menu category:** `latent/channel`
+- **Returns:** `LATENT`
+
+#### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `latent` | `LATENT` | – | – | Latent to transform in channel-space. |
+| `operation` | enum | `signed_permute` | `signed_permute/orthogonal_rotate/householder_reflect/low_rank_shear` | Linear transform to apply. |
+| `seed` | `INT` | `0` | `0..2^64-1` | Seed for deterministic selection/transforms. |
+| `sign_flip_prob` | `FLOAT` | `0.5` | `0.0..1.0` | Sign-flip probability for signed permutations. |
+| `tile_size` | `INT` | `0` | `0..512` | Tile size (latent pixels) for per-tile permutations. |
+| `block_size` | `INT` | `0` | `0..4096` | Channels per orthogonal block (`0` = full). |
+| `alpha` | `FLOAT` | `0.5` | `-4.0..4.0` | Shear strength for low-rank shear. |
+| `selection_mode` | enum | `all` | `all/random/top_variance/top_roughness/indices` | Channel selection strategy. |
+| `selection_fraction` | `FLOAT` | `1.0` | `0.0..1.0` | Fraction of channels when `selection_count=0`. |
+| `selection_count` | `INT` | `0` | `0..4096` | Exact number of channels (overrides fraction). |
+| `selection_order` | enum | `highest` | `highest/lowest` | Choose high or low variance/roughness. |
+| `selection_indices` | `STRING` | `""` | – | Comma-separated indices when `selection_mode=indices`. |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend strength for the transform. |
+| `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
+| `mask` | `MASK` | – | – | Optional mask to limit the transform. |
+
+---
+
+### Latent Channel Nonlinear Transform
+
+Applies **nonlinear channel-space transforms** (gating, quantization, clipping, dropout/replacement).
+
+- **Menu category:** `latent/channel`
+- **Returns:** `LATENT`
+
+#### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `latent` | `LATENT` | – | – | Latent to transform in channel-space. |
+| `operation` | enum | `gate_multiply` | `gate_multiply/gate_add/quantize/clip_hard/clip_soft/dropout_zero/dropout_noise/dropout_swap` | Nonlinear transform to apply. |
+| `seed` | `INT` | `0` | `0..2^64-1` | Seed for deterministic gating/dropout. |
+| `gate_strength` | `FLOAT` | `1.0` | `0.0..10.0` | Gate slope (gate_* operations). |
+| `beta` | `FLOAT` | `1.0` | `-4.0..4.0` | Gate scale (gate_* operations). |
+| `blur_radius` | `INT` | `0` | `0..64` | Blur radius for gate maps (latent pixels). |
+| `quantize_step` | `FLOAT` | `0.25` | `0.0..10.0` | Step size for quantization. |
+| `clip_threshold` | `FLOAT` | `2.0` | `0.0..10.0` | Threshold for clipping. |
+| `selection_mode` | enum | `all` | `all/random/top_variance/top_roughness/indices` | Channel selection strategy. |
+| `selection_fraction` | `FLOAT` | `1.0` | `0.0..1.0` | Fraction of channels when `selection_count=0`. |
+| `selection_count` | `INT` | `0` | `0..4096` | Exact number of channels (overrides fraction). |
+| `selection_order` | enum | `highest` | `highest/lowest` | Choose high or low variance/roughness. |
+| `selection_indices` | `STRING` | `""` | – | Comma-separated indices when `selection_mode=indices`. |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend strength for the transform. |
+| `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
+| `mask` | `MASK` | – | – | Optional mask to limit the transform. |
+
+---
+
+### Latent Packed Slot Transform
+
+Applies **slot-level operations** to packed (space-to-depth) latents by permuting/rotating the `P x P` slots inside the channel dimension.
+
+- **Menu category:** `latent/channel`
+- **Returns:** `LATENT`
+
+#### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `latent` | `LATENT` | – | – | Packed latent to transform per slot. |
+| `operation` | enum | `shuffle` | `shuffle/rotate_cw/rotate_ccw/flip_h/flip_v` | Slot operation to apply. |
+| `patch_size` | `INT` | `2` | `1..8` | Patch size `P` for `P x P` slot layout. |
+| `base_channels` | `INT` | `0` | `0..4096` | Base channels before packing (`0` = infer). |
+| `seed` | `INT` | `0` | `0..2^64-1` | Seed for slot shuffles. |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend strength for the transform. |
+| `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
+| `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
 ---
 
