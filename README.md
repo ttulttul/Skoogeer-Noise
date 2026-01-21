@@ -233,14 +233,14 @@ Applies **linear channel-space transforms** (signed permutations, orthogonal rot
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
-#### Mode behavior
+#### Mode behavior + impact
 
-| Mode | Behavior |
+| Mode | What it does | Likely impact |
 |------|----------|
-| `signed_permute` | Permutes selected channels; optionally flips signs (preserves energy but remaps features). |
-| `orthogonal_rotate` | Mixes channels with an orthogonal rotation (smooth style/material shifts). |
-| `householder_reflect` | Reflects along a random feature direction (cheap orthogonal inversion). |
-| `low_rank_shear` | Rank-1 shear that feeds a measured feature back along another direction (feature resonance). |
+| `signed_permute` | Reorders selected channels; optional sign flips keep norms but remap the feature basis. | Hard, crunchy remaps and codec-like glitches that often retain overall structure. |
+| `orthogonal_rotate` | Globally mixes channels via an orthogonal rotation (energy-preserving). | Smooth “style drift” shifts in material/texture without tearing; more coherent than permutation. |
+| `householder_reflect` | Reflects along a random feature direction (single hyperplane flip). | Inversion-like feature accents; can feel like latent “photonegative” or specular inversions. |
+| `low_rank_shear` | Rank‑1 update: measure along one direction and add along another. | Feature feedback / resonance; can create blooming or melting effects without total scramble. |
 
 ---
 
@@ -272,18 +272,18 @@ Applies **nonlinear channel-space transforms** (gating, quantization, clipping, 
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
-#### Mode behavior
+#### Mode behavior + impact
 
-| Mode | Behavior |
+| Mode | What it does | Likely impact |
 |------|----------|
-| `gate_multiply` | Scales channels by a content-aware gate (self-amplifying or suppressing features). |
-| `gate_add` | Adds a gated feature direction back into the channels (content-dependent bias). |
-| `quantize` | Rounds selected channels to a fixed step size (posterized, crunchy textures). |
-| `clip_hard` | Hard clamps values to `[-t, t]` (removes spikes, flattens extremes). |
-| `clip_soft` | Soft clamps with `tanh` (gentler compression of extremes). |
-| `dropout_zero` | Zeros selected channels (missing-feature glitches). |
-| `dropout_noise` | Replaces channels with noise matched to their mean/std. |
-| `dropout_swap` | Replaces channels with other randomly chosen channels. |
+| `gate_multiply` | Builds a per‑pixel gate from a random projection and multiplies channels by it. | Self‑amplifying/suppressing regions; “alive” glitches that track existing structure. |
+| `gate_add` | Computes a gate and adds a gated feature direction back into channels. | Content‑dependent bias; can create halos, embossed edges, or resonant highlights. |
+| `quantize` | Rounds values to a fixed step size. | Posterized, crunchy textures; flatter gradients and vector‑art vibe. |
+| `clip_hard` | Hard clamps values to `[-t, t]`. | Removes sharp spikes; can flatten detail and yield plasticky surfaces. |
+| `clip_soft` | Soft clamps with `tanh` at threshold `t`. | Gentler compression; dreamy/flattened details without abrupt clipping. |
+| `dropout_zero` | Zeros selected channels. | Missing‑feature hallucinations; sudden structure loss and glitch gaps. |
+| `dropout_noise` | Replaces channels with mean/std‑matched noise. | Grainy, unstable textures while keeping channel statistics stable. |
+| `dropout_swap` | Swaps selected channels with other random channels. | Channel cross‑talk artifacts; can look like latent “miswiring.” |
 
 ---
 
@@ -307,15 +307,15 @@ Applies **slot-level operations** to packed (space-to-depth) latents by permutin
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
-#### Mode behavior
+#### Mode behavior + impact
 
-| Mode | Behavior |
+| Mode | What it does | Likely impact |
 |------|----------|
-| `shuffle` | Randomly permutes the `P x P` slot ordering within each base channel. |
-| `rotate_cw` | Rotates the slot grid clockwise (90 degrees). |
-| `rotate_ccw` | Rotates the slot grid counterclockwise (90 degrees). |
-| `flip_h` | Flips slots left-right. |
-| `flip_v` | Flips slots top-bottom. |
+| `shuffle` | Randomly permutes the `P x P` slot ordering within each base channel. | Digital macro‑blocking, moiré‑like micro‑shifts, checkerboard artifacts. |
+| `rotate_cw` | Rotates the slot grid clockwise (90 degrees). | Directional slot shifts; subtle “micro‑rotation” with structured aliasing. |
+| `rotate_ccw` | Rotates the slot grid counterclockwise (90 degrees). | Same as rotate_cw but in opposite direction; can pair for oscillation. |
+| `flip_h` | Flips slots left‑right. | Mirrored slot patterns; can cause chromatic‑aberration‑like shifts. |
+| `flip_v` | Flips slots top‑bottom. | Vertical slot mirroring; structured digital shimmer. |
 
 ---
 
