@@ -233,6 +233,16 @@ Applies **linear channel-space transforms** (signed permutations, orthogonal rot
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
+#### Selection modes (used by Linear + Nonlinear transforms)
+
+- `all`: apply to every channel.
+- `random`: choose a random subset per sample using `seed`.
+- `top_variance`: choose channels with the highest spatial variance (usually the most "active" features).
+- `top_roughness`: choose channels with the highest mean gradient magnitude (often texture/fine detail carriers).
+- `indices`: use the explicit channel list in `selection_indices`.
+- `selection_order`: pick `highest` or `lowest` when using `top_variance`/`top_roughness` (low values tend to affect smoother, structural channels).
+- `selection_count` overrides `selection_fraction` when `> 0`.
+
 #### Mode behavior + impact
 
 | Mode | What it does | Likely impact |
