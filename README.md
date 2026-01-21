@@ -236,7 +236,7 @@ Applies **linear channel-space transforms** (signed permutations, orthogonal rot
 #### Mode behavior + impact
 
 | Mode | What it does | Likely impact |
-|------|----------|
+|------|--------------|---------------|
 | `signed_permute` | Reorders selected channels; optional sign flips keep norms but remap the feature basis. | Hard, crunchy remaps and codec-like glitches that often retain overall structure. |
 | `orthogonal_rotate` | Globally mixes channels via an orthogonal rotation (energy-preserving). | Smooth “style drift” shifts in material/texture without tearing; more coherent than permutation. |
 | `householder_reflect` | Reflects along a random feature direction (single hyperplane flip). | Inversion-like feature accents; can feel like latent “photonegative” or specular inversions. |
@@ -275,7 +275,7 @@ Applies **nonlinear channel-space transforms** (gating, quantization, clipping, 
 #### Mode behavior + impact
 
 | Mode | What it does | Likely impact |
-|------|----------|
+|------|--------------|---------------|
 | `gate_multiply` | Builds a per‑pixel gate from a random projection and multiplies channels by it. | Self‑amplifying/suppressing regions; “alive” glitches that track existing structure. |
 | `gate_add` | Computes a gate and adds a gated feature direction back into channels. | Content‑dependent bias; can create halos, embossed edges, or resonant highlights. |
 | `quantize` | Rounds values to a fixed step size. | Posterized, crunchy textures; flatter gradients and vector‑art vibe. |
@@ -310,7 +310,7 @@ Applies **slot-level operations** to packed (space-to-depth) latents by permutin
 #### Mode behavior + impact
 
 | Mode | What it does | Likely impact |
-|------|----------|
+|------|--------------|---------------|
 | `shuffle` | Randomly permutes the `P x P` slot ordering within each base channel. | Digital macro‑blocking, moiré‑like micro‑shifts, checkerboard artifacts. |
 | `rotate_cw` | Rotates the slot grid clockwise (90 degrees). | Directional slot shifts; subtle “micro‑rotation” with structured aliasing. |
 | `rotate_ccw` | Rotates the slot grid counterclockwise (90 degrees). | Same as rotate_cw but in opposite direction; can pair for oscillation. |
