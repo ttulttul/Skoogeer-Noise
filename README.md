@@ -233,6 +233,15 @@ Applies **linear channel-space transforms** (signed permutations, orthogonal rot
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
+#### Mode behavior
+
+| Mode | Behavior |
+|------|----------|
+| `signed_permute` | Permutes selected channels; optionally flips signs (preserves energy but remaps features). |
+| `orthogonal_rotate` | Mixes channels with an orthogonal rotation (smooth style/material shifts). |
+| `householder_reflect` | Reflects along a random feature direction (cheap orthogonal inversion). |
+| `low_rank_shear` | Rank-1 shear that feeds a measured feature back along another direction (feature resonance). |
+
 ---
 
 ### Latent Channel Nonlinear Transform
@@ -263,6 +272,19 @@ Applies **nonlinear channel-space transforms** (gating, quantization, clipping, 
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
+#### Mode behavior
+
+| Mode | Behavior |
+|------|----------|
+| `gate_multiply` | Scales channels by a content-aware gate (self-amplifying or suppressing features). |
+| `gate_add` | Adds a gated feature direction back into the channels (content-dependent bias). |
+| `quantize` | Rounds selected channels to a fixed step size (posterized, crunchy textures). |
+| `clip_hard` | Hard clamps values to `[-t, t]` (removes spikes, flattens extremes). |
+| `clip_soft` | Soft clamps with `tanh` (gentler compression of extremes). |
+| `dropout_zero` | Zeros selected channels (missing-feature glitches). |
+| `dropout_noise` | Replaces channels with noise matched to their mean/std. |
+| `dropout_swap` | Replaces channels with other randomly chosen channels. |
+
 ---
 
 ### Latent Packed Slot Transform
@@ -284,6 +306,16 @@ Applies **slot-level operations** to packed (space-to-depth) latents by permutin
 | `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend strength for the transform. |
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
+
+#### Mode behavior
+
+| Mode | Behavior |
+|------|----------|
+| `shuffle` | Randomly permutes the `P x P` slot ordering within each base channel. |
+| `rotate_cw` | Rotates the slot grid clockwise (90 degrees). |
+| `rotate_ccw` | Rotates the slot grid counterclockwise (90 degrees). |
+| `flip_h` | Flips slots left-right. |
+| `flip_v` | Flips slots top-bottom. |
 
 ---
 
