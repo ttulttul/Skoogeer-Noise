@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="180" viewBox="0 0 640 180">
+  <rect x="10" y="20" width="300" height="140" fill="#e9e9e9" stroke="#333333" stroke-width="2"/>
+  <text x="20" y="40" font-family="Arial, sans-serif" font-size="14" fill="#333333">Before</text>
+  <rect x="20" y="60" width="280" height="80" fill="#d0d0d0"/>
+  <line x1="30" y1="80" x2="290" y2="80" stroke="#b0b0b0" stroke-width="4"/>
+  <line x1="30" y1="100" x2="290" y2="100" stroke="#9a9a9a" stroke-width="4"/>
+  <line x1="30" y1="120" x2="290" y2="120" stroke="#888888" stroke-width="4"/>
+
+  <rect x="330" y="20" width="300" height="140" fill="#f0e0e0" stroke="#333333" stroke-width="2"/>
+  <text x="340" y="40" font-family="Arial, sans-serif" font-size="14" fill="#333333">After (signed_permute)</text>
+  <rect x="340" y="60" width="280" height="80" fill="#e2c8c8"/>
+  <rect x="350" y="70" width="60" height="20" fill="#a86a6a"/>
+  <rect x="420" y="90" width="60" height="20" fill="#8f5454"/>
+  <rect x="490" y="110" width="60" height="20" fill="#b07a7a"/>
+  <rect x="560" y="70" width="50" height="20" fill="#6d3d3d"/>
+</svg>

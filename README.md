@@ -1,14 +1,39 @@
 # Skoogeer-Noise
 
-A ComfyUI custom node pack containing:
+A ComfyUI custom node pack for latent/image/conditioning perturbations and diagnostics.
 
-- Spatial perturbations (mesh drag warps) for `LATENT` and `IMAGE`
-- Seeded Gaussian noise utilities for `LATENT`, `IMAGE`, and `CONDITIONING`
-- Procedural / structured noise generators (Perlin, Simplex, Worley, reaction-diffusion, fBm, swirl)
-- Low/high frequency split helpers for `LATENT` and `CONDITIONING`
-- Latent diagnostics preview nodes
+## Overview
+
+- Spatial perturbations (mesh drag warps) for `LATENT` and `IMAGE`.
+- Seeded Gaussian noise utilities for `LATENT`, `IMAGE`, and `CONDITIONING`.
+- Procedural / structured noise generators (Perlin, Simplex, Worley, reaction-diffusion, fBm, swirl).
+- Low/high frequency split helpers for `LATENT` and `CONDITIONING`.
+- Latent diagnostics preview nodes.
 
 This pack was extracted from `ComfyUI-FlowMatching-Upscaler` and also includes the latent/image/conditioning noise + filtering nodes that were previously shipped in `ComfyUI-QwenRectifiedFlowInverter`.
+
+## Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Concepts](#concepts)
+  - [Data Types / Shapes](#data-types--shapes)
+  - [Parameter Conventions](#parameter-conventions)
+  - [Selection Modes](#selection-modes)
+  - [Flux.2 Patchification](#flux2-patchification)
+- [Node Reference](#node-reference)
+  - [Node Index](#node-index)
+  - [Spatial Perturbations](#spatial-perturbations)
+  - [Seeded Noise](#seeded-noise)
+  - [Utilities and Debug](#utilities-and-debug)
+  - [Channel Transforms](#channel-transforms)
+  - [Frequency Filtering](#frequency-filtering)
+  - [Procedural Noise](#procedural-noise)
+  - [Flux Tools](#flux-tools)
+  - [Conditioning Tools](#conditioning-tools)
+- [Examples Gallery](#examples-gallery)
+- [Development](#development)
 
 ## Installation
 
@@ -17,9 +42,33 @@ This pack was extracted from `ComfyUI-FlowMatching-Upscaler` and also includes t
 
 Dependencies: `torch`, `numpy`, and `einops` (ComfyUI typically already includes torch/numpy).
 
-## Data types / shapes
+## Quick Start
 
-### `LATENT`
+Workflow sketch (SD-style latents):
+
+```
+Latent -> Latent Channel Linear Transform (operation=orthogonal_rotate, selection_mode=top_roughness, selection_fraction=0.25, mix=0.6)
+      -> Latent Swirl Noise (vortices=3, strength=0.8, mix=0.5)
+      -> VAE Decode
+```
+
+Flux.2 latents (patchified) should wrap latent-space ops:
+
+```
+Unpatchify Flux.2 Latent -> (your latent ops) -> Patchify Flux.2 Latent
+```
+
+Tips:
+
+- Use `mask` to localize effects.
+- Lower `mix` for subtle edits.
+- Pair `Latent Channel Stats Preview` to inspect channel shifts.
+
+## Concepts
+
+### Data Types / Shapes
+
+#### `LATENT`
 
 ComfyUI latents are dictionaries containing a `"samples"` tensor.
 
@@ -28,24 +77,20 @@ ComfyUI latents are dictionaries containing a `"samples"` tensor.
 
 All latent nodes in this pack operate on `latent["samples"]` and preserve other latent dict keys. Most latent nodes accept an optional `mask` input; when provided, the mask is resized to latent resolution (bicubic when downscaling) and the effect is applied only within the mask. `Latent Mesh Drag` also warps `latent["noise_mask"]` when present.
 
-### Flux.2 latents (patchified)
+#### `IMAGE`
 
-Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel latents at 1/16 spatial resolution. Our latent noise nodes operate on spatial neighborhoods, so applying them directly to patchified latents can introduce 2x2 block artifacts and incorrect spatial correlations. Use `Unpatchify Flux.2 Latent` before running latent noise nodes, then `Patchify Flux.2 Latent` afterward to return to the standard Flux.2 format.
-
-### `IMAGE`
-
-ComfyUI images are torch tensors in **BHWC** format: `(B, H, W, C)` (usually `C=3`). Some nodes also accept 5D “video” tensors: `(B, T, H, W, C)`.
+ComfyUI images are torch tensors in **BHWC** format: `(B, H, W, C)` (usually `C=3`). Some nodes also accept 5D "video" tensors: `(B, T, H, W, C)`.
 
 Image noise nodes accept an optional `mask` input; when provided, the mask is resized to the image resolution (bicubic when downscaling) and the effect is applied only within the mask.
 
-### `CONDITIONING`
+#### `CONDITIONING`
 
 ComfyUI conditioning is a list of `[embedding, metadata]` entries. The conditioning nodes in this pack operate on:
 
 - the embedding tensor (commonly shaped like `(tokens, features)` or `(B, tokens, features)`), and
 - `metadata["pooled_output"]` when present.
 
-## Parameter conventions
+### Parameter Conventions
 
 - **Seed (`seed`)**: 64-bit integer used to make perturbations repeatable.
 - **Strength (`strength`)**: unless stated otherwise, noise nodes scale their generated pattern by the **standard deviation of the input** (per-sample).
@@ -56,58 +101,87 @@ ComfyUI conditioning is a list of `[embedding, metadata]` entries. The condition
   - `locked`: reuse one pattern across frames (temporally stable)
   - `animated`: reseed per frame (more variation, can flicker)
 
-## Node index
+#### Common Parameters
+
+| Parameter | Meaning | Notes |
+|-----------|---------|-------|
+| `seed` | 64-bit integer for repeatable randomness. | When present, it drives deterministic sampling. |
+| `strength` | Scales noise relative to the input's standard deviation. | Unless a node defines strength differently. |
+| `channel_mode` | Controls whether noise is shared or per-channel. | `shared` reuses one field, `per_channel` reseeds per channel. |
+| `temporal_mode` | Controls temporal consistency for 5D tensors. | `locked` is stable, `animated` reseeds per frame. |
+| `mix` | Blends original and modified outputs. | `0` = original, `1` = full effect. |
+| `mask` | Optional mask limiting the effect. | Resized to target resolution. |
+
+When node tables list these parameters, the Notes column may say "See Common Parameters."
+
+### Selection Modes
+
+- `all`: apply to every channel.
+- `random`: choose a random subset per sample using `seed`.
+- `top_variance`: choose channels with the highest spatial variance (usually the most active features).
+- `top_roughness`: choose channels with the highest mean gradient magnitude (often texture/fine detail carriers).
+- `indices`: use the explicit channel list in `selection_indices`.
+- `selection_order`: pick `highest` or `lowest` when using `top_variance`/`top_roughness` (low values tend to affect smoother, structural channels).
+- `selection_count` overrides `selection_fraction` when `> 0`.
+
+### Flux.2 Patchification
+
+Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel latents at 1/16 spatial resolution. Our latent noise nodes operate on spatial neighborhoods, so applying them directly to patchified latents can introduce 2x2 block artifacts and incorrect spatial correlations. Use `Unpatchify Flux.2 Latent` before running latent noise nodes, then `Patchify Flux.2 Latent` afterward to return to the standard Flux.2 format.
+
+## Node Reference
+
+### Node Index
 
 | Node | Category | Output(s) |
 |------|----------|-----------|
-| `Latent Mesh Drag` | `latent/perturb` | `LATENT` |
-| `Image Mesh Drag` | `image/perturb` | `IMAGE` |
-| `Fluid Latent Advection` | `latent/perturb` | `LATENT`, `IMAGE` |
-| `Fluid Image Advection` | `image/perturb` | `IMAGE`, `IMAGE` |
-| `Latent Smoke Simulation` | `latent/perturb` | `LATENT`, `IMAGE`, `IMAGE` |
-| `Image Smoke Simulation` | `image/perturb` | `IMAGE`, `IMAGE`, `IMAGE` |
-| `Latent Noise` | `latent/perturb` | `LATENT` |
-| `Image Noise` | `image/perturb` | `IMAGE` |
-| `Latent Channel Stats Preview` | `latent/debug` | `IMAGE` |
-| `Latent Channel Linear Transform` | `latent/channel` | `LATENT` |
-| `Latent Channel Nonlinear Transform` | `latent/channel` | `LATENT` |
-| `Latent Packed Slot Transform` | `latent/channel` | `LATENT` |
-| `Latent Gaussian Blur` | `Latent/Filter` | `LATENT` |
-| `Latent Frequency Split` | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
-| `Latent Frequency Merge` | `Latent/Filter` | `LATENT` |
-| `Add Latent Noise (Seeded)` | `Latent/Noise` | `LATENT` |
-| `Add Image Noise (Seeded)` | `Image/Noise` | `IMAGE` |
-| `Latent Perlin Fractal Noise` | `Latent/Noise` | `LATENT` |
-| `Image Perlin Fractal Noise` | `Image/Noise` | `IMAGE` |
-| `Latent Simplex Noise` | `Latent/Noise` | `LATENT` |
-| `Image Simplex Noise` | `Image/Noise` | `IMAGE` |
-| `Latent Worley Noise` | `Latent/Noise` | `LATENT` |
-| `Image Worley Noise` | `Image/Noise` | `IMAGE` |
-| `Latent Reaction-Diffusion` | `Latent/Noise` | `LATENT` |
-| `Image Reaction-Diffusion` | `Image/Noise` | `IMAGE` |
-| `Latent Fractal Brownian Motion` | `Latent/Noise` | `LATENT` |
-| `Image Fractal Brownian Motion` | `Image/Noise` | `IMAGE` |
-| `Latent Swirl Noise` | `Latent/Noise` | `LATENT` |
-| `Image Swirl Noise` | `Image/Noise` | `IMAGE` |
-| `Forward Diffusion (Add Scheduled Noise)` | `Latent/Noise` | `LATENT` |
-| `Unpatchify Flux.2 Latent` | `Latent/Flux` | `LATENT` |
-| `Patchify Flux.2 Latent` | `Latent/Flux` | `LATENT` |
-| `Conditioning (Add Noise)` | `conditioning/noise` | `CONDITIONING` |
-| `Conditioning (Gaussian Blur)` | `conditioning/filter` | `CONDITIONING` |
-| `Conditioning (Frequency Split)` | `conditioning/filter` | `CONDITIONING` (low), `CONDITIONING` (high) |
-| `Conditioning (Frequency Merge)` | `conditioning/filter` | `CONDITIONING` |
-| `Conditioning (Scale)` | `conditioning/filter` | `CONDITIONING` |
+| [Latent Mesh Drag](#latent-mesh-drag) | `latent/perturb` | `LATENT` |
+| [Image Mesh Drag](#image-mesh-drag) | `image/perturb` | `IMAGE` |
+| [Fluid Latent Advection](#fluid-latent-advection) | `latent/perturb` | `LATENT`, `IMAGE` |
+| [Fluid Image Advection](#fluid-image-advection) | `image/perturb` | `IMAGE`, `IMAGE` |
+| [Latent Smoke Simulation](#latent-smoke-simulation) | `latent/perturb` | `LATENT`, `IMAGE`, `IMAGE` |
+| [Image Smoke Simulation](#image-smoke-simulation) | `image/perturb` | `IMAGE`, `IMAGE`, `IMAGE` |
+| [Latent Noise](#latent-noise) | `latent/perturb` | `LATENT` |
+| [Image Noise](#image-noise) | `image/perturb` | `IMAGE` |
+| [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
+| [Latent Channel Linear Transform](#latent-channel-linear-transform) | `latent/channel` | `LATENT` |
+| [Latent Channel Nonlinear Transform](#latent-channel-nonlinear-transform) | `latent/channel` | `LATENT` |
+| [Latent Packed Slot Transform](#latent-packed-slot-transform) | `latent/channel` | `LATENT` |
+| [Latent Gaussian Blur](#latent-gaussian-blur) | `Latent/Filter` | `LATENT` |
+| [Latent Frequency Split](#latent-frequency-split) | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
+| [Latent Frequency Merge](#latent-frequency-merge) | `Latent/Filter` | `LATENT` |
+| [Add Latent Noise (Seeded)](#add-latent-noise-seeded) | `Latent/Noise` | `LATENT` |
+| [Add Image Noise (Seeded)](#add-image-noise-seeded) | `Image/Noise` | `IMAGE` |
+| [Latent Perlin Fractal Noise](#latent-perlin-fractal-noise) | `Latent/Noise` | `LATENT` |
+| [Image Perlin Fractal Noise](#image-perlin-fractal-noise) | `Image/Noise` | `IMAGE` |
+| [Latent Simplex Noise](#latent-simplex-noise) | `Latent/Noise` | `LATENT` |
+| [Image Simplex Noise](#image-simplex-noise) | `Image/Noise` | `IMAGE` |
+| [Latent Worley Noise](#latent-worley-noise) | `Latent/Noise` | `LATENT` |
+| [Image Worley Noise](#image-worley-noise) | `Image/Noise` | `IMAGE` |
+| [Latent Reaction-Diffusion](#latent-reaction-diffusion) | `Latent/Noise` | `LATENT` |
+| [Image Reaction-Diffusion](#image-reaction-diffusion) | `Image/Noise` | `IMAGE` |
+| [Latent Fractal Brownian Motion](#latent-fractal-brownian-motion) | `Latent/Noise` | `LATENT` |
+| [Image Fractal Brownian Motion](#image-fractal-brownian-motion) | `Image/Noise` | `IMAGE` |
+| [Latent Swirl Noise](#latent-swirl-noise) | `Latent/Noise` | `LATENT` |
+| [Image Swirl Noise](#image-swirl-noise) | `Image/Noise` | `IMAGE` |
+| [Forward Diffusion (Add Scheduled Noise)](#forward-diffusion-add-scheduled-noise) | `Latent/Noise` | `LATENT` |
+| [Unpatchify Flux.2 Latent](#unpatchify-flux2-latent) | `Latent/Flux` | `LATENT` |
+| [Patchify Flux.2 Latent](#patchify-flux2-latent) | `Latent/Flux` | `LATENT` |
+| [Conditioning (Add Noise)](#conditioning-add-noise) | `conditioning/noise` | `CONDITIONING` |
+| [Conditioning (Gaussian Blur)](#conditioning-gaussian-blur) | `conditioning/filter` | `CONDITIONING` |
+| [Conditioning (Frequency Split)](#conditioning-frequency-split) | `conditioning/filter` | `CONDITIONING` (low), `CONDITIONING` (high) |
+| [Conditioning (Frequency Merge)](#conditioning-frequency-merge) | `conditioning/filter` | `CONDITIONING` |
+| [Conditioning (Scale)](#conditioning-scale) | `conditioning/filter` | `CONDITIONING` |
 
-## Nodes
+### Spatial Perturbations
 
-### Latent Mesh Drag
+#### Latent Mesh Drag
 
 Applies a cloth-like spatial warp to a `LATENT` by randomly dragging control vertices on a coarse mesh and interpolating a smooth displacement field.
 
 - **Menu category:** `latent/perturb`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -123,7 +197,7 @@ Applies a cloth-like spatial warp to a `LATENT` by randomly dragging control ver
 | `spline_passes` | `INT` | `2` | `0..16` | Only used when `displacement_interpolation = bspline`. |
 | `sampling_interpolation` | enum | `bilinear` | `bilinear/bicubic/nearest` | How to sample the source tensor when applying the warp. |
 
-#### Notes
+##### Notes
 
 - Drag distances are specified in **latent pixels** (multiply by ~8 for image-space pixels with SD-style VAEs).
 - If a `mask` is supplied, the warp is applied only in the masked area (and the mask is resized to latent resolution).
@@ -131,14 +205,14 @@ Applies a cloth-like spatial warp to a `LATENT` by randomly dragging control ver
 
 ---
 
-### Image Mesh Drag
+#### Image Mesh Drag
 
 Applies the same mesh-drag deformation in image space (pixel units) to ComfyUI `IMAGE` tensors.
 
 - **Menu category:** `image/perturb`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -155,48 +229,112 @@ Applies the same mesh-drag deformation in image space (pixel units) to ComfyUI `
 
 ---
 
-### Latent Noise
+#### Fluid Latent Advection
+
+Advects latent channels through a viscous velocity field and returns a velocity preview image.
+
+- **Menu category:** `latent/perturb`
+- **Returns:** `LATENT`, `IMAGE`
+
+##### Inputs
+
+See `docs/fluid-simulation.md` for the full parameter list (shared with the image variant). Core controls include `steps`, `dt`, `resolution_scale`, force injection settings, `vorticity`, and `wrap_mode`.
+
+##### Notes
+
+- Optional `mask` limits the effect to masked areas.
+
+---
+
+#### Fluid Image Advection
+
+Distorts an image by advecting pixels through a viscous velocity field and returns a velocity preview image.
+
+- **Menu category:** `image/perturb`
+- **Returns:** `IMAGE`, `IMAGE`
+
+##### Inputs
+
+See `docs/fluid-simulation.md` for the full parameter list (shared with the latent variant). Core controls include `steps`, `dt`, `resolution_scale`, force injection settings, `vorticity`, and `wrap_mode`.
+
+##### Notes
+
+- Optional `mask` limits the effect to masked areas.
+
+---
+
+#### Latent Smoke Simulation
+
+Simulates buoyancy-driven smoke in latent space and returns density and velocity previews.
+
+- **Menu category:** `latent/perturb`
+- **Returns:** `LATENT`, `IMAGE`, `IMAGE`
+
+##### Inputs
+
+See `docs/fluid-simulation.md` for smoke-mode parameters such as `smoke_source_mode`, `buoyancy`, `cooling`, and output batching controls.
+
+---
+
+#### Image Smoke Simulation
+
+Simulates buoyancy-driven smoke in image space and returns density and velocity previews.
+
+- **Menu category:** `image/perturb`
+- **Returns:** `IMAGE`, `IMAGE`, `IMAGE`
+
+##### Inputs
+
+See `docs/fluid-simulation.md` for smoke-mode parameters such as `smoke_source_mode`, `buoyancy`, `cooling`, and output batching controls.
+
+---
+
+### Seeded Noise
+
+#### Latent Noise
 
 Adds **seeded Gaussian noise** to a ComfyUI `LATENT` dictionary.
 
 - **Menu category:** `latent/perturb`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `latent` | `LATENT` | – | – | Latent to receive additional Gaussian noise. |
-| `seed` | `INT` | `0` | `0..2^64-1` | Seed for generating repeatable noise. |
-| `strength` | `FLOAT` | `1.0` | `0.0..10.0` | Noise strength relative to the latent's standard deviation. |
+| `seed` | `INT` | `0` | `0..2^64-1` | See Common Parameters. |
+| `strength` | `FLOAT` | `1.0` | `0.0..10.0` | See Common Parameters. |
 
 ---
 
-### Image Noise
+#### Image Noise
 
 Adds **seeded Gaussian noise** to a ComfyUI `IMAGE` tensor.
 
 - **Menu category:** `image/perturb`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `image` | `IMAGE` | – | – | Image to receive additional Gaussian noise. |
-| `seed` | `INT` | `0` | `0..2^64-1` | Seed for generating repeatable noise. |
-| `strength` | `FLOAT` | `1.0` | `0.0..10.0` | Noise strength relative to the image's standard deviation. |
+| `seed` | `INT` | `0` | `0..2^64-1` | See Common Parameters. |
+| `strength` | `FLOAT` | `1.0` | `0.0..10.0` | See Common Parameters. |
 
 ---
 
-### Latent Channel Stats Preview
+### Utilities and Debug
+
+#### Latent Channel Stats Preview
 
 Renders a bar-chart preview of **per-channel mean and standard deviation** for `LATENT["samples"]`.
 
 - **Menu category:** `latent/debug`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -206,14 +344,16 @@ Renders a bar-chart preview of **per-channel mean and standard deviation** for `
 
 ---
 
-### Latent Channel Linear Transform
+### Channel Transforms
+
+#### Latent Channel Linear Transform
 
 Applies **linear channel-space transforms** (signed permutations, orthogonal rotations, Householder reflections, low-rank shears).
 
 - **Menu category:** `latent/channel`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -229,21 +369,11 @@ Applies **linear channel-space transforms** (signed permutations, orthogonal rot
 | `selection_count` | `INT` | `0` | `0..4096` | Exact number of channels (overrides fraction). |
 | `selection_order` | enum | `highest` | `highest/lowest` | Choose high or low variance/roughness. |
 | `selection_indices` | `STRING` | `""` | – | Comma-separated indices when `selection_mode=indices`. |
-| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend strength for the transform. |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | See Common Parameters. |
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
-#### Selection modes (used by Linear + Nonlinear transforms)
-
-- `all`: apply to every channel.
-- `random`: choose a random subset per sample using `seed`.
-- `top_variance`: choose channels with the highest spatial variance (usually the most "active" features).
-- `top_roughness`: choose channels with the highest mean gradient magnitude (often texture/fine detail carriers).
-- `indices`: use the explicit channel list in `selection_indices`.
-- `selection_order`: pick `highest` or `lowest` when using `top_variance`/`top_roughness` (low values tend to affect smoother, structural channels).
-- `selection_count` overrides `selection_fraction` when `> 0`.
-
-#### Mode behavior + impact
+##### Mode behavior + impact
 
 | Mode | What it does | Likely impact |
 |------|--------------|---------------|
@@ -254,14 +384,14 @@ Applies **linear channel-space transforms** (signed permutations, orthogonal rot
 
 ---
 
-### Latent Channel Nonlinear Transform
+#### Latent Channel Nonlinear Transform
 
 Applies **nonlinear channel-space transforms** (gating, quantization, clipping, dropout/replacement).
 
 - **Menu category:** `latent/channel`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -278,11 +408,11 @@ Applies **nonlinear channel-space transforms** (gating, quantization, clipping, 
 | `selection_count` | `INT` | `0` | `0..4096` | Exact number of channels (overrides fraction). |
 | `selection_order` | enum | `highest` | `highest/lowest` | Choose high or low variance/roughness. |
 | `selection_indices` | `STRING` | `""` | – | Comma-separated indices when `selection_mode=indices`. |
-| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend strength for the transform. |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | See Common Parameters. |
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
-#### Mode behavior + impact
+##### Mode behavior + impact
 
 | Mode | What it does | Likely impact |
 |------|--------------|---------------|
@@ -297,14 +427,14 @@ Applies **nonlinear channel-space transforms** (gating, quantization, clipping, 
 
 ---
 
-### Latent Packed Slot Transform
+#### Latent Packed Slot Transform
 
 Applies **slot-level operations** to packed (space-to-depth) latents by permuting/rotating the `P x P` slots inside the channel dimension.
 
 - **Menu category:** `latent/channel`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -313,11 +443,11 @@ Applies **slot-level operations** to packed (space-to-depth) latents by permutin
 | `patch_size` | `INT` | `2` | `1..8` | Patch size `P` for `P x P` slot layout. |
 | `base_channels` | `INT` | `0` | `0..4096` | Base channels before packing (`0` = infer). |
 | `seed` | `INT` | `0` | `0..2^64-1` | Seed for slot shuffles. |
-| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend strength for the transform. |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | See Common Parameters. |
 | `match_stats` | `BOOLEAN` | `false` | – | Match per-channel mean/std after edit. |
 | `mask` | `MASK` | – | – | Optional mask to limit the transform. |
 
-#### Mode behavior + impact
+##### Mode behavior + impact
 
 | Mode | What it does | Likely impact |
 |------|--------------|---------------|
@@ -329,14 +459,16 @@ Applies **slot-level operations** to packed (space-to-depth) latents by permutin
 
 ---
 
-### Latent Gaussian Blur
+### Frequency Filtering
+
+#### Latent Gaussian Blur
 
 Gaussian blur for latents (supports both 4D and 5D latents).
 
 - **Menu category:** `Latent/Filter`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -346,35 +478,35 @@ Gaussian blur for latents (supports both 4D and 5D latents).
 
 ---
 
-### Latent Frequency Split
+#### Latent Frequency Split
 
 Splits a latent into **low-pass** and **high-pass** bands by subtracting a Gaussian-smoothed version.
 
 - **Menu category:** `Latent/Filter`
 - **Returns:** `LATENT` (low), `LATENT` (high)
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `latent` | `LATENT` | – | – | Latent to decompose into low/high frequency bands. |
 | `sigma` | `FLOAT` | `1.5` | `0.0..20.0` | Radius of Gaussian low-pass. Higher moves more detail into the high band. |
 
-#### Outputs
+##### Outputs
 
 - `low_pass`: blurred latent
 - `high_pass`: `latent - low_pass` (zeros when `sigma <= 0`)
 
 ---
 
-### Latent Frequency Merge
+#### Latent Frequency Merge
 
 Merges the **low-pass** and **high-pass** bands back into a single latent.
 
 - **Menu category:** `Latent/Filter`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -383,54 +515,56 @@ Merges the **low-pass** and **high-pass** bands back into a single latent.
 | `low_gain` | `FLOAT` | `1.0` | `-5.0..5.0` | Multiplier for the low-pass band before merging. |
 | `high_gain` | `FLOAT` | `1.0` | `-5.0..5.0` | Multiplier for the high-pass band before merging. |
 
-#### Output
+##### Output
 
 - `merged`: `low_pass * low_gain + high_pass * high_gain`
 
 ---
 
-### Add Latent Noise (Seeded)
+### Procedural Noise
+
+#### Add Latent Noise (Seeded)
 
 Adds seeded Gaussian noise to `LATENT["samples"]` (strength is relative to the latent's standard deviation).
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `latent` | `LATENT` | – | – | Latent to receive additional Gaussian noise. |
-| `seed` | `INT` | `0` | `0..2^64-1` | Seed for generating repeatable noise. |
+| `seed` | `INT` | `0` | `0..2^64-1` | See Common Parameters. |
 | `strength` | `FLOAT` | `1.0` | `0.0..10.0` | `1.0` adds noise with roughly the same std as the latent. |
 
 ---
 
-### Add Image Noise (Seeded)
+#### Add Image Noise (Seeded)
 
 Adds seeded Gaussian noise to an `IMAGE` tensor (strength is relative to the image's standard deviation).
 
 - **Menu category:** `Image/Noise`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `image` | `IMAGE` | – | – | Image to receive additional Gaussian noise. |
-| `seed` | `INT` | `0` | `0..2^64-1` | Seed for generating repeatable noise. |
+| `seed` | `INT` | `0` | `0..2^64-1` | See Common Parameters. |
 | `strength` | `FLOAT` | `1.0` | `0.0..10.0` | `1.0` adds noise with roughly the same std as the image. |
 
 ---
 
-### Latent Perlin Fractal Noise
+#### Latent Perlin Fractal Noise
 
 Adds smooth **fractal Perlin noise** to a latent for structured variation.
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -441,22 +575,22 @@ Adds smooth **fractal Perlin noise** to a latent for structured variation.
 | `persistence` | `FLOAT` | `0.5` | `0.0..1.0` | Amplitude multiplier between octaves. |
 | `lacunarity` | `FLOAT` | `2.0` | `1.0..6.0` | Frequency multiplier between octaves. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized noise relative to the latent's standard deviation. |
-| `channel_mode` | enum | `shared` | `shared/per_channel` | Shared noise across channels or unique noise per channel. |
+| `channel_mode` | enum | `shared` | `shared/per_channel` | See Common Parameters. |
 
-#### Notes
+##### Notes
 
 - For 5D latents `(B,C,T,H,W)`, this node generates **3D Perlin noise** across `(T,H,W)` (no `temporal_mode` parameter).
 
 ---
 
-### Image Perlin Fractal Noise
+#### Image Perlin Fractal Noise
 
 Adds smooth **fractal Perlin noise** to an image for structured variation.
 
 - **Menu category:** `Image/Noise`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -467,19 +601,19 @@ Adds smooth **fractal Perlin noise** to an image for structured variation.
 | `persistence` | `FLOAT` | `0.5` | `0.0..1.0` | Amplitude multiplier between octaves. |
 | `lacunarity` | `FLOAT` | `2.0` | `1.0..6.0` | Frequency multiplier between octaves. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized noise relative to the image's standard deviation. |
-| `channel_mode` | enum | `shared` | `shared/per_channel` | Reuse a single noise field for all channels or reseed per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D images only: reuse or reseed the pattern per frame. |
+| `channel_mode` | enum | `shared` | `shared/per_channel` | See Common Parameters. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Latent Simplex Noise
+#### Latent Simplex Noise
 
 Adds layered **fractal simplex noise** to a latent for organic perturbations.
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -490,19 +624,19 @@ Adds layered **fractal simplex noise** to a latent for organic perturbations.
 | `persistence` | `FLOAT` | `0.5` | `0.0..1.0` | Amplitude multiplier applied between octaves. |
 | `lacunarity` | `FLOAT` | `2.0` | `1.0..6.0` | Frequency multiplier applied between octaves. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized simplex noise relative to the latent's standard deviation. |
-| `channel_mode` | enum | `shared` | `shared/per_channel` | Reuse a single noise field for all channels or reseed per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D latents only: reuse or reseed the pattern per frame. |
+| `channel_mode` | enum | `shared` | `shared/per_channel` | See Common Parameters. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Image Simplex Noise
+#### Image Simplex Noise
 
 Adds layered **fractal simplex noise** to an image.
 
 - **Menu category:** `Image/Noise`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -513,19 +647,19 @@ Adds layered **fractal simplex noise** to an image.
 | `persistence` | `FLOAT` | `0.5` | `0.0..1.0` | Amplitude multiplier applied between octaves. |
 | `lacunarity` | `FLOAT` | `2.0` | `1.0..6.0` | Frequency multiplier applied between octaves. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized simplex noise relative to the image's standard deviation. |
-| `channel_mode` | enum | `shared` | `shared/per_channel` | Reuse a single noise field for all channels or reseed per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D images only: reuse or reseed the pattern per frame. |
+| `channel_mode` | enum | `shared` | `shared/per_channel` | See Common Parameters. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Latent Worley Noise
+#### Latent Worley Noise
 
 Generates **cellular (Worley) noise** for cracked / biological / bubble-like textures.
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -538,19 +672,19 @@ Generates **cellular (Worley) noise** for cracked / biological / bubble-like tex
 | `distance_metric` | enum | `euclidean` | `euclidean/manhattan/chebyshev` | Distance metric used when measuring feature proximity. |
 | `jitter` | `FLOAT` | `0.35` | `0.0..1.0` | How far feature points can drift inside each cell. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized Worley noise relative to the latent's standard deviation. |
-| `channel_mode` | enum | `shared` | `shared/per_channel` | Shared noise for all channels or reseeded per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D latents only: reuse or reseed the pattern per frame. |
+| `channel_mode` | enum | `shared` | `shared/per_channel` | See Common Parameters. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Image Worley Noise
+#### Image Worley Noise
 
 Generates **cellular (Worley) noise** and injects it into an image.
 
 - **Menu category:** `Image/Noise`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -563,19 +697,19 @@ Generates **cellular (Worley) noise** and injects it into an image.
 | `distance_metric` | enum | `euclidean` | `euclidean/manhattan/chebyshev` | Distance metric used when measuring feature proximity. |
 | `jitter` | `FLOAT` | `0.35` | `0.0..1.0` | How far feature points can drift inside each cell. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized Worley noise relative to the image's standard deviation. |
-| `channel_mode` | enum | `shared` | `shared/per_channel` | Shared noise for all channels or reseeded per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D images only: reuse or reseed the pattern per frame. |
+| `channel_mode` | enum | `shared` | `shared/per_channel` | See Common Parameters. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Latent Reaction-Diffusion
+#### Latent Reaction-Diffusion
 
 Runs a Gray-Scott **reaction-diffusion** simulation and injects the resulting pattern into a latent.
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -589,18 +723,18 @@ Runs a Gray-Scott **reaction-diffusion** simulation and injects the resulting pa
 | `time_step` | `FLOAT` | `1.0` | `0.01..5.0` | Simulation time step used during integration. |
 | `strength` | `FLOAT` | `0.75` | `0.0..5.0` | Scales normalized pattern relative to the latent's standard deviation. |
 | `channel_mode` | enum | `shared` | `shared/per_channel` | Reuse one simulation for all channels or rerun per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D latents only: reuse or rerun simulation per frame. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Image Reaction-Diffusion
+#### Image Reaction-Diffusion
 
 Runs a Gray-Scott **reaction-diffusion** simulation and injects the resulting pattern into an image.
 
 - **Menu category:** `Image/Noise`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -614,18 +748,18 @@ Runs a Gray-Scott **reaction-diffusion** simulation and injects the resulting pa
 | `time_step` | `FLOAT` | `1.0` | `0.01..5.0` | Simulation time step used during integration. |
 | `strength` | `FLOAT` | `0.75` | `0.0..5.0` | Scales normalized pattern relative to the image's standard deviation. |
 | `channel_mode` | enum | `shared` | `shared/per_channel` | Reuse one simulation for all channels or rerun per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D images only: reuse or rerun simulation per frame. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Latent Fractal Brownian Motion
+#### Latent Fractal Brownian Motion
 
 Builds **fractal Brownian motion (fBm)** from a selectable base noise and injects it into a latent.
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -641,18 +775,18 @@ Builds **fractal Brownian motion (fBm)** from a selectable base noise and inject
 | `jitter` | `FLOAT` | `0.35` | `0.0..1.0` | Feature jitter amount for Worley base noise. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized fBm relative to the latent's standard deviation. |
 | `channel_mode` | enum | `shared` | `shared/per_channel` | Shared fBm field per sample or reseeded per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D latents only: reuse or reseed the fBm per frame. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Image Fractal Brownian Motion
+#### Image Fractal Brownian Motion
 
 Builds **fractal Brownian motion (fBm)** from a selectable base noise and injects it into an image.
 
 - **Menu category:** `Image/Noise`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -668,18 +802,18 @@ Builds **fractal Brownian motion (fBm)** from a selectable base noise and inject
 | `jitter` | `FLOAT` | `0.35` | `0.0..1.0` | Feature jitter amount for Worley base noise. |
 | `strength` | `FLOAT` | `0.5` | `0.0..5.0` | Scales normalized fBm relative to the image's standard deviation. |
 | `channel_mode` | enum | `shared` | `shared/per_channel` | Shared fBm field per sample or reseeded per channel. |
-| `temporal_mode` | enum | `locked` | `locked/animated` | 5D images only: reuse or reseed the fBm per frame. |
+| `temporal_mode` | enum | `locked` | `locked/animated` | See Common Parameters. |
 
 ---
 
-### Latent Swirl Noise
+#### Latent Swirl Noise
 
 Swirls latent pixels around randomized centers (vortex-like warp). This is a **spatial deformation**, not additive noise.
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -692,18 +826,18 @@ Swirls latent pixels around randomized centers (vortex-like warp). This is a **s
 | `radius` | `FLOAT` | `0.5` | `0.05..2.0` | Normalized radius controlling how far the vortex influence extends. |
 | `center_spread` | `FLOAT` | `0.25` | `0.0..1.0` | How far the vortex origin drifts from the latent center. |
 | `direction_bias` | `FLOAT` | `0.0` | `-1.0..1.0` | Bias toward counter-clockwise (`1`) or clockwise (`-1`) swirl. |
-| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend between original (`0`) and fully swirled (`1`). |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | See Common Parameters. |
 
 ---
 
-### Image Swirl Noise
+#### Image Swirl Noise
 
 Swirls image pixels around randomized centers (vortex-like warp). This is a **spatial deformation**, not additive noise.
 
 - **Menu category:** `Image/Noise`
 - **Returns:** `IMAGE`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -716,18 +850,18 @@ Swirls image pixels around randomized centers (vortex-like warp). This is a **sp
 | `radius` | `FLOAT` | `0.5` | `0.05..2.0` | Normalized radius controlling how far the vortex influence extends. |
 | `center_spread` | `FLOAT` | `0.25` | `0.0..1.0` | How far the vortex origin drifts from the image center. |
 | `direction_bias` | `FLOAT` | `0.0` | `-1.0..1.0` | Bias toward counter-clockwise (`1`) or clockwise (`-1`) swirl. |
-| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend between original (`0`) and fully swirled (`1`). |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | See Common Parameters. |
 
 ---
 
-### Forward Diffusion (Add Scheduled Noise)
+#### Forward Diffusion (Add Scheduled Noise)
 
 Adds “sampler-like” scheduled noise to a clean latent, using the model's sigma schedule when available.
 
 - **Menu category:** `Latent/Noise`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -737,59 +871,63 @@ Adds “sampler-like” scheduled noise to a clean latent, using the model's sig
 | `steps` | `INT` | `20` | `1..10000` | Number of steps in the sampler's schedule. |
 | `noise_strength` | `FLOAT` | `0.8` | `0.0..1.0` | How far along the schedule to noise to (0 = no-op). |
 
-#### Notes
+##### Notes
 
 - When ComfyUI is available, this node pulls `sigmas` from `comfy.samplers.KSampler(model, steps=...)`. Otherwise it falls back to a simple linear sigma schedule.
 - `noise_strength` is mapped to a start step via `start_step = steps - int(steps * noise_strength)`.
 
 ---
 
-### Unpatchify Flux.2 Latent
+### Flux Tools
+
+#### Unpatchify Flux.2 Latent
 
 Converts patchified Flux.2 latents into unpatchified latents with double spatial resolution.
 
 - **Menu category:** `Latent/Flux`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `latent` | `LATENT` | – | – | Flux.2 latent to expand from 128-channel 2x2 patchified form. |
 
-#### Notes
+##### Notes
 
 - Use this before latent noise nodes so their spatial operations happen on true neighboring pixels rather than 2x2 patch blocks.
 
 ---
 
-### Patchify Flux.2 Latent
+#### Patchify Flux.2 Latent
 
 Re-patchifies an unpatchified Flux.2 latent back to the standard 2x2 patch format.
 
 - **Menu category:** `Latent/Flux`
 - **Returns:** `LATENT`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `latent` | `LATENT` | – | – | Unpatchified Flux.2 latent to return to 128-channel patchified form. |
 
-#### Notes
+##### Notes
 
 - Use this after latent noise nodes to restore the format expected by Flux.2 models and downstream nodes.
 
 ---
 
-### Conditioning (Add Noise)
+### Conditioning Tools
+
+#### Conditioning (Add Noise)
 
 Adds seeded Gaussian noise to conditioning embeddings and their `pooled_output` when present.
 
 - **Menu category:** `conditioning/noise`
 - **Returns:** `CONDITIONING`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -799,14 +937,14 @@ Adds seeded Gaussian noise to conditioning embeddings and their `pooled_output` 
 
 ---
 
-### Conditioning (Gaussian Blur)
+#### Conditioning (Gaussian Blur)
 
 Applies Gaussian smoothing along the **token dimension** of conditioning embeddings.
 
 - **Menu category:** `conditioning/filter`
 - **Returns:** `CONDITIONING`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -815,14 +953,14 @@ Applies Gaussian smoothing along the **token dimension** of conditioning embeddi
 
 ---
 
-### Conditioning (Frequency Split)
+#### Conditioning (Frequency Split)
 
 Separates conditioning embeddings into low/high bands via Gaussian smoothing along the token axis.
 
 - **Menu category:** `conditioning/filter`
 - **Returns:** `CONDITIONING` (low), `CONDITIONING` (high)
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -831,14 +969,14 @@ Separates conditioning embeddings into low/high bands via Gaussian smoothing alo
 
 ---
 
-### Conditioning (Frequency Merge)
+#### Conditioning (Frequency Merge)
 
 Recombines low/high conditioning bands back into a single conditioning list.
 
 - **Menu category:** `conditioning/filter`
 - **Returns:** `CONDITIONING`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
@@ -849,19 +987,44 @@ Recombines low/high conditioning bands back into a single conditioning list.
 
 ---
 
-### Conditioning (Scale)
+#### Conditioning (Scale)
 
 Scales conditioning embeddings (and `pooled_output` when present) to amplify or mute prompt influence.
 
 - **Menu category:** `conditioning/filter`
 - **Returns:** `CONDITIONING`
 
-#### Inputs
+##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `conditioning` | `CONDITIONING` | – | – | Conditioning list to scale. |
 | `factor` | `FLOAT` | `1.0` | `0.0..10.0` | Multiplier applied to embeddings. `0` mutes, `1` keeps original. |
+
+## Examples Gallery
+
+These are small illustrative before/after pairs. Replace them with real ComfyUI renders as needed.
+
+<details>
+<summary>Channel Rotation (orthogonal_rotate)</summary>
+
+![Channel rotation example](docs/examples/channel-rotation.svg)
+
+</details>
+
+<details>
+<summary>Signed Permutation Glitch (signed_permute)</summary>
+
+![Signed permutation example](docs/examples/signed-permutation.svg)
+
+</details>
+
+<details>
+<summary>Packed Slot Shuffle (Flux-style)</summary>
+
+![Packed slot shuffle example](docs/examples/packed-slot-shuffle.svg)
+
+</details>
 
 ## Development
 
