@@ -142,7 +142,8 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Image Smoke Simulation](#image-smoke-simulation) | `image/perturb` | `IMAGE`, `IMAGE`, `IMAGE` |
 | [Latent Noise](#latent-noise) | `latent/perturb` | `LATENT` |
 | [Image Noise](#image-noise) | `image/perturb` | `IMAGE` |
-| [Latent to Image](#latent-to-image) | `latent/debug` | `IMAGE` |
+| [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
+| [Image Batch to Latent](#image-batch-to-latent) | `latent/debug` | `LATENT` |
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
 | [Latent Channel Linear Transform](#latent-channel-linear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Nonlinear Transform](#latent-channel-nonlinear-transform) | `latent/channel` | `LATENT` |
@@ -328,7 +329,7 @@ Adds **seeded Gaussian noise** to a ComfyUI `IMAGE` tensor.
 
 ### Utilities and Debug
 
-#### Latent to Image
+#### Latent to Image Batch
 
 Converts each latent channel into its own grayscale image and batches the results.
 
@@ -342,6 +343,24 @@ Converts each latent channel into its own grayscale image and batches the result
 | `latent` | `LATENT` | – | – | Latent to render into per-channel grayscale images. |
 | `normalize` | `BOOLEAN` | `false` | – | If true, per-image min/max normalization maps values into `[0,1]`. |
 | `output_channels` | enum | `3` | `1/3` | Use `3` to repeat grayscale into RGB for PreviewImage compatibility; output shape is `(B*C, H, W, C)`. |
+
+---
+
+#### Image Batch to Latent
+
+Merges a batch of per-channel grayscale images back into a `LATENT` tensor.
+
+- **Menu category:** `latent/debug`
+- **Returns:** `LATENT`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `image_batch` | `IMAGE` | – | – | Batch of images representing latent channels. |
+| `batch_size` | `INT` | `0` | `0..4096` | Original latent batch size (`0` to infer from `channels`). |
+| `channels` | `INT` | `0` | `0..4096` | Channel count per latent sample (`0` to infer from `batch_size`). |
+| `channel_source` | enum | `r` | `r/g/b/mean` | Which channel to use from RGB inputs (mean averages channels). |
 
 ---
 

@@ -58,6 +58,69 @@ def _normalize_minmax(images: torch.Tensor) -> torch.Tensor:
     return normalized.clamp(0.0, 1.0)
 
 
+def _validate_image_batch(image_batch: object) -> torch.Tensor:
+    if not isinstance(image_batch, torch.Tensor):
+        raise TypeError(f"IMAGE input must be a torch.Tensor, got {type(image_batch)}.")
+    if image_batch.ndim != 4:
+        raise ValueError(f"IMAGE input must be 4D (B, H, W, C), got {tuple(image_batch.shape)}.")
+    if not image_batch.is_floating_point():
+        raise TypeError(f"IMAGE input must be floating point, got dtype={image_batch.dtype}.")
+    if int(image_batch.shape[0]) == 0:
+        raise ValueError("IMAGE input must have a non-empty batch dimension.")
+    if int(image_batch.shape[-1]) not in (1, 3):
+        raise ValueError(
+            "IMAGE input must have 1 or 3 channels in the last dimension, "
+            f"got {int(image_batch.shape[-1])}."
+        )
+    if int(image_batch.shape[1]) == 0 or int(image_batch.shape[2]) == 0:
+        raise ValueError("IMAGE input must have non-empty spatial dimensions.")
+    return image_batch
+
+
+def _resolve_batch_channels(total: int, batch_size: int, channels: int) -> Tuple[int, int]:
+    total = int(total)
+    batch_size = int(batch_size)
+    channels = int(channels)
+    if total <= 0:
+        raise ValueError("IMAGE batch must contain at least one element.")
+    if batch_size < 0 or channels < 0:
+        raise ValueError("batch_size and channels must be >= 0.")
+    if batch_size == 0 and channels == 0:
+        raise ValueError("Provide either batch_size or channels (or both) to reconstruct the latent.")
+    if batch_size == 0:
+        if total % channels != 0:
+            raise ValueError(f"Batch of {total} images cannot be split into {channels} channels per sample.")
+        batch_size = total // channels
+    if channels == 0:
+        if total % batch_size != 0:
+            raise ValueError(f"Batch of {total} images cannot be split into batch_size={batch_size}.")
+        channels = total // batch_size
+    if batch_size * channels != total:
+        raise ValueError(
+            f"batch_size ({batch_size}) * channels ({channels}) must equal image batch size ({total})."
+        )
+    if batch_size == 0 or channels == 0:
+        raise ValueError("Resolved batch_size and channels must both be > 0.")
+    return batch_size, channels
+
+
+def _extract_grayscale(images: torch.Tensor, channel_source: str) -> torch.Tensor:
+    channels = int(images.shape[-1])
+    if channels == 1:
+        return images[..., 0]
+
+    channel_source = str(channel_source).lower()
+    if channel_source == "r":
+        return images[..., 0]
+    if channel_source == "g":
+        return images[..., 1]
+    if channel_source == "b":
+        return images[..., 2]
+    if channel_source == "mean":
+        return images.mean(dim=-1)
+    raise ValueError(f"Unknown channel_source '{channel_source}', expected r/g/b/mean.")
+
+
 class LatentToImage:
     CATEGORY = "latent/debug"
     FUNCTION = "render"
@@ -129,10 +192,71 @@ class LatentToImage:
         return (output,)
 
 
+class ImageBatchToLatent:
+    CATEGORY = "latent/debug"
+    FUNCTION = "merge"
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image_batch": ("IMAGE", {"tooltip": "Batch of images representing latent channels."}),
+                "batch_size": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 4096,
+                    "tooltip": "Original latent batch size (0 to infer from channels).",
+                }),
+                "channels": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 4096,
+                    "tooltip": "Channel count per latent sample (0 to infer from batch_size).",
+                }),
+                "channel_source": (["r", "g", "b", "mean"], {
+                    "default": "r",
+                    "tooltip": "Which channel to use from RGB inputs (mean averages channels).",
+                }),
+            }
+        }
+
+    def merge(self, image_batch, batch_size=0, channels=0, channel_source="r"):
+        images = _validate_image_batch(image_batch)
+
+        logger.debug(
+            "ImageBatchToLatent input: shape=%s dtype=%s device=%s",
+            tuple(images.shape),
+            images.dtype,
+            images.device,
+        )
+
+        total = int(images.shape[0])
+        height = int(images.shape[1])
+        width = int(images.shape[2])
+        batch_size, channels = _resolve_batch_channels(total, batch_size, channels)
+
+        gray = _extract_grayscale(images, channel_source)
+        gray = gray.contiguous()
+
+        samples = gray.reshape(batch_size, channels, height, width)
+
+        logger.debug(
+            "ImageBatchToLatent output: shape=%s batch_size=%s channels=%s",
+            tuple(samples.shape),
+            batch_size,
+            channels,
+        )
+        return ({"samples": samples},)
+
+
 NODE_CLASS_MAPPINGS = {
     "LatentToImage": LatentToImage,
+    "ImageBatchToLatent": ImageBatchToLatent,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LatentToImage": "Latent to Image",
+    "LatentToImage": "Latent to Image Batch",
+    "ImageBatchToLatent": "Image Batch to Latent",
 }
