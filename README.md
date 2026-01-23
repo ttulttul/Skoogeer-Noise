@@ -341,7 +341,7 @@ Converts each latent channel into its own grayscale image and batches the result
 |------|------|---------|--------------|------|
 | `latent` | `LATENT` | – | – | Latent to render into per-channel grayscale images. |
 | `normalize` | `BOOLEAN` | `false` | – | If true, per-image min/max normalization maps values into `[0,1]`. |
-| `output_layout` | enum | `nchw` | `nchw/bhwc` | `nchw` returns `(B*C, 1, H, W)`; `bhwc` returns `(B*C, H, W, 1)` for standard ComfyUI images. |
+| `output_channels` | enum | `3` | `1/3` | Use `3` to repeat grayscale into RGB for PreviewImage compatibility; output shape is `(B*C, H, W, C)`. |
 
 ---
 

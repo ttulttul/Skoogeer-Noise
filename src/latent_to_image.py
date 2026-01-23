@@ -73,14 +73,14 @@ class LatentToImage:
                     "default": False,
                     "tooltip": "Normalize each output image to [0,1] using per-image min/max.",
                 }),
-                "output_layout": (["nchw", "bhwc"], {
-                    "default": "nchw",
-                    "tooltip": "Output tensor layout: NCHW is channel-first; BHWC matches ComfyUI IMAGE format.",
+                "output_channels": (["1", "3"], {
+                    "default": "3",
+                    "tooltip": "Use 3 to repeat grayscale into RGB for PreviewImage compatibility.",
                 }),
             }
         }
 
-    def render(self, latent, normalize=False, output_layout="nchw"):
+    def render(self, latent, normalize=False, output_channels="3"):
         latent = _validate_latent(latent)
         samples: torch.Tensor = latent["samples"]
 
@@ -112,17 +112,18 @@ class LatentToImage:
         if normalize:
             images = _normalize_minmax(images)
 
-        if output_layout == "nchw":
-            output = images.unsqueeze(1)
-        elif output_layout == "bhwc":
-            output = images.unsqueeze(-1)
-        else:
-            raise ValueError(f"Unknown output_layout '{output_layout}', expected 'nchw' or 'bhwc'.")
+        output_channels = str(output_channels)
+        if output_channels not in ("1", "3"):
+            raise ValueError(f"output_channels must be '1' or '3', got '{output_channels}'.")
+
+        output = images.unsqueeze(-1)
+        if output_channels == "3":
+            output = output.repeat(1, 1, 1, 3)
 
         logger.debug(
-            "LatentToImage output: shape=%s layout=%s normalize=%s",
+            "LatentToImage output: shape=%s output_channels=%s normalize=%s",
             tuple(output.shape),
-            output_layout,
+            output_channels,
             bool(normalize),
         )
         return (output,)
