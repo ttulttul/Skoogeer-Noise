@@ -42,6 +42,10 @@ if __package__:
         NODE_CLASS_MAPPINGS as CHANNEL_OP_NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS as CHANNEL_OP_DISPLAY_NAME_MAPPINGS,
     )
+    from .src.latent_to_image import (  # type: ignore[attr-defined] # noqa: F401
+        NODE_CLASS_MAPPINGS as LATENT_TO_IMAGE_NODE_CLASS_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS as LATENT_TO_IMAGE_DISPLAY_NAME_MAPPINGS,
+    )
     from .src.qwen_noise_nodes import (  # type: ignore[attr-defined] # noqa: F401
         NODE_CLASS_MAPPINGS as QWEN_NOISE_NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS as QWEN_NOISE_DISPLAY_NAME_MAPPINGS,
@@ -61,6 +65,7 @@ else:  # pragma: no cover - direct execution fallback
     channel_op_module = _load_module_from_path(
         "latent_channel_space_ops", _ROOT_DIR / "src" / "latent_channel_space_ops.py"
     )
+    latent_to_image_module = _load_module_from_path("latent_to_image", _ROOT_DIR / "src" / "latent_to_image.py")
     qwen_noise_module = _load_module_from_path("qwen_noise_nodes", _ROOT_DIR / "src" / "qwen_noise_nodes.py")
 
     STATS_NODE_CLASS_MAPPINGS = getattr(stats_module, "NODE_CLASS_MAPPINGS")
@@ -75,6 +80,8 @@ else:  # pragma: no cover - direct execution fallback
     FREQ_DISPLAY_NAME_MAPPINGS = getattr(freq_module, "NODE_DISPLAY_NAME_MAPPINGS")
     CHANNEL_OP_NODE_CLASS_MAPPINGS = getattr(channel_op_module, "NODE_CLASS_MAPPINGS")
     CHANNEL_OP_DISPLAY_NAME_MAPPINGS = getattr(channel_op_module, "NODE_DISPLAY_NAME_MAPPINGS")
+    LATENT_TO_IMAGE_NODE_CLASS_MAPPINGS = getattr(latent_to_image_module, "NODE_CLASS_MAPPINGS")
+    LATENT_TO_IMAGE_DISPLAY_NAME_MAPPINGS = getattr(latent_to_image_module, "NODE_DISPLAY_NAME_MAPPINGS")
     QWEN_NOISE_NODE_CLASS_MAPPINGS = getattr(qwen_noise_module, "NODE_CLASS_MAPPINGS")
     QWEN_NOISE_DISPLAY_NAME_MAPPINGS = getattr(qwen_noise_module, "NODE_DISPLAY_NAME_MAPPINGS")
 
@@ -84,6 +91,7 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     **FLUID_NODE_CLASS_MAPPINGS,
     **FREQ_NODE_CLASS_MAPPINGS,
     **NOISE_NODE_CLASS_MAPPINGS,
+    **LATENT_TO_IMAGE_NODE_CLASS_MAPPINGS,
     **QWEN_NOISE_NODE_CLASS_MAPPINGS,
     **STATS_NODE_CLASS_MAPPINGS,
 }
@@ -93,6 +101,7 @@ NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     **FLUID_DISPLAY_NAME_MAPPINGS,
     **FREQ_DISPLAY_NAME_MAPPINGS,
     **NOISE_DISPLAY_NAME_MAPPINGS,
+    **LATENT_TO_IMAGE_DISPLAY_NAME_MAPPINGS,
     **QWEN_NOISE_DISPLAY_NAME_MAPPINGS,
     **STATS_DISPLAY_NAME_MAPPINGS,
 }

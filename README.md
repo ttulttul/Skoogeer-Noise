@@ -142,6 +142,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Image Smoke Simulation](#image-smoke-simulation) | `image/perturb` | `IMAGE`, `IMAGE`, `IMAGE` |
 | [Latent Noise](#latent-noise) | `latent/perturb` | `LATENT` |
 | [Image Noise](#image-noise) | `image/perturb` | `IMAGE` |
+| [Latent to Image](#latent-to-image) | `latent/debug` | `IMAGE` |
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
 | [Latent Channel Linear Transform](#latent-channel-linear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Nonlinear Transform](#latent-channel-nonlinear-transform) | `latent/channel` | `LATENT` |
@@ -326,6 +327,23 @@ Adds **seeded Gaussian noise** to a ComfyUI `IMAGE` tensor.
 ---
 
 ### Utilities and Debug
+
+#### Latent to Image
+
+Converts each latent channel into its own grayscale image and batches the results.
+
+- **Menu category:** `latent/debug`
+- **Returns:** `IMAGE`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `latent` | `LATENT` | – | – | Latent to render into per-channel grayscale images. |
+| `normalize` | `BOOLEAN` | `false` | – | If true, per-image min/max normalization maps values into `[0,1]`. |
+| `output_layout` | enum | `nchw` | `nchw/bhwc` | `nchw` returns `(B*C, 1, H, W)`; `bhwc` returns `(B*C, H, W, 1)` for standard ComfyUI images. |
+
+---
 
 #### Latent Channel Stats Preview
 
