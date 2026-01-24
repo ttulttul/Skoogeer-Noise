@@ -147,6 +147,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
 | [Latent Channel Linear Transform](#latent-channel-linear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Nonlinear Transform](#latent-channel-nonlinear-transform) | `latent/channel` | `LATENT` |
+| [Latent Channel Merge](#latent-channel-merge) | `latent/channel` | `LATENT` |
 | [Latent Packed Slot Transform](#latent-packed-slot-transform) | `latent/channel` | `LATENT` |
 | [Latent Gaussian Blur](#latent-gaussian-blur) | `Latent/Filter` | `LATENT` |
 | [Latent Frequency Split](#latent-frequency-split) | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
@@ -461,6 +462,30 @@ Applies **nonlinear channel-space transforms** (gating, quantization, clipping, 
 | `dropout_zero` | Zeros selected channels. | Missing‑feature hallucinations; sudden structure loss and glitch gaps. |
 | `dropout_noise` | Replaces channels with mean/std‑matched noise. | Grainy, unstable textures while keeping channel statistics stable. |
 | `dropout_swap` | Swaps selected channels with other random channels. | Channel cross‑talk artifacts; can look like latent “miswiring.” |
+
+---
+
+#### Latent Channel Merge
+
+Blends selected channels from a **source** latent into a **destination** latent.
+
+- **Menu category:** `latent/channel`
+- **Returns:** `LATENT`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `destination` | `LATENT` | – | – | Latent to blend into (destination). |
+| `source` | `LATENT` | – | – | Latent providing channels to blend (source). |
+| `seed` | `INT` | `0` | `0..2^64-1` | Seed for deterministic selection when `selection_mode=random`. |
+| `selection_mode` | enum | `all` | `all/random/top_variance/top_roughness/indices` | Channel selection strategy (metrics measured on the source latent). |
+| `selection_fraction` | `FLOAT` | `1.0` | `0.0..1.0` | Fraction of channels when `selection_count=0`. |
+| `selection_count` | `INT` | `0` | `0..4096` | Exact number of channels (overrides fraction). |
+| `selection_order` | enum | `highest` | `highest/lowest` | Choose high or low variance/roughness. |
+| `selection_indices` | `STRING` | `""` | – | Comma-separated indices when `selection_mode=indices`. |
+| `blend_strength` | `FLOAT` | `1.0` | `-4.0..4.0` | Blend factor for selected channels (`0` keeps destination, `1` uses source, values outside `[0,1]` extrapolate). |
+| `mask` | `MASK` | – | – | Optional mask to limit the merge. |
 
 ---
 

@@ -942,6 +942,158 @@ class LatentChannelNonlinearTransform:
         return (out_latent,)
 
 
+class LatentChannelMerge:
+    """
+    Blends selected channels from a source latent into a destination latent.
+    """
+
+    CATEGORY = "latent/channel"
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION = "merge"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "destination": ("LATENT", {"tooltip": "Latent to blend into (destination)."}),
+                "source": ("LATENT", {"tooltip": "Latent providing channels to blend (source)."}),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": _SEED_MASK_64,
+                    "tooltip": "Seed for deterministic channel selection when selection_mode=random.",
+                }),
+                "selection_mode": (["all", "random", "top_variance", "top_roughness", "indices"], {
+                    "default": "all",
+                    "tooltip": "How to choose which source channels to blend.",
+                }),
+                "selection_fraction": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "round": 0.01,
+                    "tooltip": "Fraction of channels to select when selection_count is 0.",
+                }),
+                "selection_count": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 4096,
+                    "step": 1,
+                    "tooltip": "Exact number of channels to select (overrides selection_fraction when >0).",
+                }),
+                "selection_order": (["highest", "lowest"], {
+                    "default": "highest",
+                    "tooltip": "Whether to pick high or low variance/roughness channels.",
+                }),
+                "selection_indices": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Comma-separated channel indices to select when selection_mode=indices.",
+                }),
+                "blend_strength": ("FLOAT", {
+                    "default": 1.0,
+                    "min": -4.0,
+                    "max": 4.0,
+                    "step": 0.01,
+                    "round": 0.01,
+                    "tooltip": "Blend strength for selected channels (0=none, 1=full, >1 or <0 allowed).",
+                }),
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask to limit the merge to masked areas."}),
+            },
+        }
+
+    def merge(
+        self,
+        destination,
+        source,
+        seed: int,
+        selection_mode: str,
+        selection_fraction: float,
+        selection_count: int,
+        selection_order: str,
+        selection_indices: str,
+        blend_strength: float,
+        mask=None,
+    ):
+        destination = _validate_latent(destination)
+        source = _validate_latent(source)
+        dest_samples = destination["samples"]
+        source_samples = source["samples"]
+
+        if dest_samples.shape != source_samples.shape:
+            raise ValueError(
+                "Source and destination latents must have the same shape; "
+                f"got {tuple(source_samples.shape)} vs {tuple(dest_samples.shape)}."
+            )
+        if dest_samples.device != source_samples.device:
+            raise ValueError(
+                "Source and destination latents must be on the same device; "
+                f"got {source_samples.device} vs {dest_samples.device}."
+            )
+
+        dest_flat = _flatten_to_nchw(dest_samples)
+        source_flat = _flatten_to_nchw(source_samples)
+        if dest_flat.tensor.shape != source_flat.tensor.shape:
+            raise ValueError(
+                "Source and destination latents must flatten to the same shape; "
+                f"got {tuple(source_flat.tensor.shape)} vs {tuple(dest_flat.tensor.shape)}."
+            )
+
+        channels = int(dest_flat.tensor.shape[1])
+        indices = _parse_channel_indices(selection_indices, channels=channels)
+        selected = _select_channel_indices(
+            source_flat.tensor,
+            mode=selection_mode,
+            fraction=selection_fraction,
+            count=selection_count,
+            seed=int(seed),
+            indices=indices.to(device=source_flat.tensor.device),
+            order=selection_order,
+        )
+
+        logger.debug(
+            "LatentChannelMerge shape=%s selection=%s blend=%.3f",
+            tuple(dest_samples.shape),
+            selection_mode,
+            float(blend_strength),
+        )
+
+        out = dest_flat.tensor.clone()
+        blend_strength = float(blend_strength)
+        with torch.no_grad():
+            for sample_index in range(int(dest_flat.tensor.shape[0])):
+                channel_indices = selected[sample_index]
+                if channel_indices.numel() == 0:
+                    continue
+                dest_sample = dest_flat.tensor[sample_index]
+                source_sample = source_flat.tensor[sample_index]
+                blended = dest_sample[channel_indices] + (
+                    source_sample[channel_indices] - dest_sample[channel_indices]
+                ) * blend_strength
+                out[sample_index, channel_indices] = blended
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise TypeError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=dest_flat.batch_size,
+                height=int(dest_samples.shape[-2]),
+                width=int(dest_samples.shape[-1]),
+                device=dest_flat.tensor.device,
+            )
+            mask_nchw = _expand_mask(mask_nchw, dest_flat.extra_dim)
+            out = blend_with_mask(dest_flat.tensor, out, mask_nchw)
+
+        out_latent = destination.copy()
+        out_latent["samples"] = dest_flat.restore(out)
+        return (out_latent,)
+
+
 class LatentPackedSlotTransform:
     """
     Applies slot-level operations to packed (space-to-depth) latents.
@@ -1059,11 +1211,13 @@ class LatentPackedSlotTransform:
 NODE_CLASS_MAPPINGS = {
     "LatentChannelLinearTransform": LatentChannelLinearTransform,
     "LatentChannelNonlinearTransform": LatentChannelNonlinearTransform,
+    "LatentChannelMerge": LatentChannelMerge,
     "LatentPackedSlotTransform": LatentPackedSlotTransform,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LatentChannelLinearTransform": "Latent Channel Linear Transform",
     "LatentChannelNonlinearTransform": "Latent Channel Nonlinear Transform",
+    "LatentChannelMerge": "Latent Channel Merge",
     "LatentPackedSlotTransform": "Latent Packed Slot Transform",
 }

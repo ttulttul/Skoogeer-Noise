@@ -9,6 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.latent_channel_space_ops import (  # noqa: E402
     LatentChannelLinearTransform,
+    LatentChannelMerge,
     LatentChannelNonlinearTransform,
     LatentPackedSlotTransform,
 )
@@ -159,6 +160,71 @@ def test_quantize_respects_mask():
     quantized = torch.round(samples / 0.5) * 0.5
     mask_broadcast = mask.unsqueeze(1)
     expected = samples * (1.0 - mask_broadcast) + quantized * mask_broadcast
+    assert torch.allclose(out["samples"], expected)
+
+
+def test_latent_channel_merge_indices_blend_strength():
+    dest_samples = torch.tensor(
+        [[
+            [[0.0, 0.0], [0.0, 0.0]],
+            [[10.0, 10.0], [10.0, 10.0]],
+            [[20.0, 20.0], [20.0, 20.0]],
+        ]],
+        dtype=torch.float32,
+    )
+    source_samples = torch.tensor(
+        [[
+            [[1.0, 1.0], [1.0, 1.0]],
+            [[2.0, 2.0], [2.0, 2.0]],
+            [[3.0, 3.0], [3.0, 3.0]],
+        ]],
+        dtype=torch.float32,
+    )
+
+    node = LatentChannelMerge()
+    (out,) = node.merge(
+        destination={"samples": dest_samples.clone()},
+        source={"samples": source_samples},
+        seed=0,
+        selection_mode="indices",
+        selection_fraction=1.0,
+        selection_count=0,
+        selection_order="highest",
+        selection_indices="1,2",
+        blend_strength=0.5,
+    )
+
+    expected = dest_samples.clone()
+    expected[:, 1] = dest_samples[:, 1] + (source_samples[:, 1] - dest_samples[:, 1]) * 0.5
+    expected[:, 2] = dest_samples[:, 2] + (source_samples[:, 2] - dest_samples[:, 2]) * 0.5
+    assert torch.allclose(out["samples"], expected)
+
+
+def test_latent_channel_merge_top_variance_selection_count():
+    dest_samples = torch.zeros((1, 2, 2, 2), dtype=torch.float32)
+    source_samples = torch.tensor(
+        [[
+            [[1.0, 1.0], [1.0, 1.0]],
+            [[0.0, 2.0], [0.0, 2.0]],
+        ]],
+        dtype=torch.float32,
+    )
+
+    node = LatentChannelMerge()
+    (out,) = node.merge(
+        destination={"samples": dest_samples.clone()},
+        source={"samples": source_samples},
+        seed=0,
+        selection_mode="top_variance",
+        selection_fraction=0.0,
+        selection_count=1,
+        selection_order="highest",
+        selection_indices="",
+        blend_strength=1.0,
+    )
+
+    expected = dest_samples.clone()
+    expected[:, 1] = source_samples[:, 1]
     assert torch.allclose(out["samples"], expected)
 
 
