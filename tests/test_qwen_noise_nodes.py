@@ -102,6 +102,23 @@ def test_latent_add_noise_reproducible_with_seed():
     assert not torch.allclose(first["samples"], third["samples"])
 
 
+def test_latent_add_noise_batch_seed_offsets():
+    node = qnn.LatentAddNoise()
+    base = torch.linspace(
+        0.0,
+        1.0,
+        FLOW_MATCHING_CHANNELS * FLOW_MATCHING_TEMPORAL * FLOW_MATCHING_WIDTH * FLOW_MATCHING_HEIGHT,
+        dtype=torch.float32,
+    ).reshape(1, FLOW_MATCHING_CHANNELS, FLOW_MATCHING_TEMPORAL, FLOW_MATCHING_WIDTH, FLOW_MATCHING_HEIGHT)
+    latent = make_latent_from_tensor(base.repeat(2, 1, 1, 1, 1))
+
+    (batched,) = node.add_noise(latent, seed=101, strength=0.5)
+    (single,) = node.add_noise(make_latent_from_tensor(base.clone()), seed=102, strength=0.5)
+
+    assert batched["samples"].shape[0] == 2
+    assert torch.allclose(batched["samples"][1], single["samples"][0])
+
+
 def test_latent_add_noise_respects_mask():
     node = qnn.LatentAddNoise()
     latent = make_flow_matching_latent()
@@ -305,6 +322,18 @@ def test_image_add_noise_reproducible_with_seed():
     assert first.shape == image.shape
     assert torch.allclose(first, second)
     assert not torch.allclose(first, third)
+
+
+def test_image_add_noise_batch_seed_offsets():
+    node = qnn.ImageAddNoise()
+    base = torch.linspace(0.0, 1.0, 16 * 16 * 3, dtype=torch.float32).reshape(1, 16, 16, 3)
+    image = base.repeat(2, 1, 1, 1)
+
+    (batched,) = node.add_noise(image, seed=55, strength=0.4)
+    (single,) = node.add_noise(base.clone(), seed=56, strength=0.4)
+
+    assert batched.shape[0] == 2
+    assert torch.allclose(batched[1], single[0])
 
 
 def test_image_add_noise_respects_mask():
@@ -622,6 +651,18 @@ def test_swirl_noise_channel_fraction_zero_is_noop():
     )
 
     assert torch.allclose(result["samples"], latent["samples"])
+
+
+def test_latent_forward_diffusion_batch_seed_offsets():
+    node = qnn.LatentForwardDiffusion()
+    base = torch.linspace(0.0, 1.0, 4 * 8 * 8, dtype=torch.float32).reshape(1, 4, 8, 8)
+    latent = make_latent_from_tensor(base.repeat(2, 1, 1, 1))
+
+    (batched,) = node.add_scheduled_noise(None, latent, seed=7, steps=5, noise_strength=0.6)
+    (single,) = node.add_scheduled_noise(None, make_latent_from_tensor(base.clone()), seed=8, steps=5, noise_strength=0.6)
+
+    assert batched["samples"].shape[0] == 2
+    assert torch.allclose(batched["samples"][1], single["samples"][0])
 
 
 def test_conditioning_nodes_modify_embeddings_and_metadata():

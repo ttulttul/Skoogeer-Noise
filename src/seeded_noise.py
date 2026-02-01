@@ -38,6 +38,15 @@ def _safe_global_std(tensor: torch.Tensor) -> float:
     return value
 
 
+def _safe_per_sample_std(tensor: torch.Tensor) -> torch.Tensor:
+    batch = int(tensor.shape[0])
+    flat = tensor.detach().float().reshape(batch, -1)
+    std = flat.std(dim=1, unbiased=False)
+    std = torch.where(torch.isfinite(std), std, torch.ones_like(std))
+    std = torch.where(std > 1e-6, std, torch.ones_like(std))
+    return std
+
+
 def add_seeded_noise(
     tensor: torch.Tensor,
     *,
@@ -55,16 +64,56 @@ def add_seeded_noise(
         return tensor
 
     with torch.no_grad():
-        noise = _seeded_gaussian_noise_like(tensor, seed=int(seed))
-        scale = _safe_global_std(tensor) if scale_by_std else 1.0
+        seed_value = int(seed) & _SEED_MASK_64
+
+        if tensor.ndim == 0:
+            noise = _seeded_gaussian_noise_like(tensor, seed=seed_value)
+            scale = _safe_global_std(tensor) if scale_by_std else 1.0
+            logger.debug(
+                "Adding seeded noise: shape=%s seed=%d strength=%.4f scale=%.6f",
+                tuple(tensor.shape),
+                seed_value,
+                strength,
+                scale,
+            )
+            return tensor + noise * (strength * scale)
+
+        batch = int(tensor.shape[0])
+        if batch <= 0:
+            raise ValueError("Input tensor batch dimension must be non-empty.")
+
+        if batch == 1:
+            noise = _seeded_gaussian_noise_like(tensor, seed=seed_value)
+            scale = _safe_global_std(tensor) if scale_by_std else 1.0
+            logger.debug(
+                "Adding seeded noise: shape=%s seed=%d strength=%.4f scale=%.6f",
+                tuple(tensor.shape),
+                seed_value,
+                strength,
+                scale,
+            )
+            return tensor + noise * (strength * scale)
+
+        scales = _safe_per_sample_std(tensor) if scale_by_std else torch.ones(batch, device=tensor.device, dtype=torch.float32)
+        noise = torch.empty_like(tensor, device=tensor.device, dtype=tensor.dtype)
+
+        for batch_index in range(batch):
+            batch_seed = (seed_value + batch_index) & _SEED_MASK_64
+            sample_noise = _seeded_gaussian_noise_like(tensor[batch_index], seed=batch_seed)
+            noise[batch_index] = sample_noise.to(dtype=tensor.dtype)
+
+        scale_view = scales.view(batch, *([1] * (tensor.ndim - 1)))
+        scaled_noise = noise * (strength * scale_view)
         logger.debug(
-            "Adding seeded noise: shape=%s seed=%d strength=%.4f scale=%.6f",
+            "Adding seeded noise: shape=%s batch=%d seed=%d strength=%.4f scale_min=%.6f scale_max=%.6f",
             tuple(tensor.shape),
-            int(seed),
+            batch,
+            seed_value,
             strength,
-            scale,
+            float(scales.min().item()),
+            float(scales.max().item()),
         )
-        return tensor + noise * (strength * scale)
+        return tensor + scaled_noise
 
 
 class LatentNoise:

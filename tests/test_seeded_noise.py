@@ -18,6 +18,17 @@ def test_latent_noise_deterministic_for_seed():
     assert torch.allclose(out1["samples"], out2["samples"])
 
 
+def test_latent_noise_batch_seed_offsets():
+    base = torch.linspace(0.0, 1.0, 4 * 8 * 8, dtype=torch.float32).reshape(1, 4, 8, 8)
+    latent = {"samples": base.repeat(2, 1, 1, 1)}
+    node = LatentNoise()
+
+    (batched,) = node.add_noise(latent, seed=10, strength=0.5)
+    (single,) = node.add_noise({"samples": base.clone()}, seed=11, strength=0.5)
+
+    assert torch.allclose(batched["samples"][1], single["samples"][0])
+
+
 def test_latent_noise_strength_zero_noop():
     samples = torch.randn((1, 4, 8, 8), dtype=torch.float32)
     latent = {"samples": samples}
@@ -55,6 +66,17 @@ def test_image_noise_deterministic_for_seed():
     (out2,) = node.add_noise(image, seed=999, strength=0.25)
     assert torch.allclose(out1, out2)
     assert out1.shape == image.shape
+
+
+def test_image_noise_batch_seed_offsets():
+    base = torch.linspace(0.0, 1.0, 16 * 16 * 3, dtype=torch.float32).reshape(1, 16, 16, 3)
+    image = base.repeat(2, 1, 1, 1)
+    node = ImageNoise()
+
+    (batched,) = node.add_noise(image, seed=3, strength=0.4)
+    (single,) = node.add_noise(base.clone(), seed=4, strength=0.4)
+
+    assert torch.allclose(batched[1], single[0])
 
 
 def test_image_noise_strength_zero_noop():

@@ -92,7 +92,7 @@ ComfyUI conditioning is a list of `[embedding, metadata]` entries. The condition
 
 ### Parameter Conventions
 
-- **Seed (`seed`)**: 64-bit integer used to make perturbations repeatable.
+- **Seed (`seed`)**: 64-bit integer used to make perturbations repeatable. For batched inputs, noise nodes offset the seed by batch index (`seed + index`) so each sample is deterministic regardless of batch size.
 - **Strength (`strength`)**: unless stated otherwise, noise nodes scale their generated pattern by the **standard deviation of the input** (per-sample).
 - **Channel mode (`channel_mode`)**:
   - `shared`: reuse one generated field for all channels

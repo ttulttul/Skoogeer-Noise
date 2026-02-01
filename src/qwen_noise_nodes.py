@@ -30,6 +30,8 @@ except ModuleNotFoundError:  # pragma: no cover - comfy is only available inside
 
 logger = logging.getLogger(__name__)
 
+_SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
+
 
 def _get_device() -> torch.device:
     if comfy_model_management is not None:
@@ -74,6 +76,60 @@ class _ProgressBar:
 
 def _progress_bar(total: int) -> _ProgressBar:
     return _ProgressBar(total)
+
+
+def _seeded_gaussian_noise_like(tensor: torch.Tensor, seed: int) -> torch.Tensor:
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError(f"Expected torch.Tensor, got {type(tensor)}")
+
+    seed = int(seed) & _SEED_MASK_64
+    if tensor.ndim == 0:
+        generator = torch.Generator(device="cpu").manual_seed(seed)
+        noise = torch.randn((), generator=generator, device="cpu", dtype=torch.float32)
+        if noise.device != tensor.device:
+            noise = noise.to(device=tensor.device)
+        return noise.to(dtype=tensor.dtype)
+
+    batch = int(tensor.shape[0])
+    if batch <= 0:
+        raise ValueError("Input tensor batch dimension must be non-empty.")
+
+    if batch == 1:
+        generator = torch.Generator(device="cpu").manual_seed(seed)
+        noise = torch.randn(tensor.shape, generator=generator, device="cpu", dtype=torch.float32)
+        if noise.device != tensor.device:
+            noise = noise.to(device=tensor.device)
+        return noise.to(dtype=tensor.dtype)
+
+    noise = torch.empty_like(tensor, device=tensor.device, dtype=tensor.dtype)
+    for batch_index in range(batch):
+        batch_seed = (seed + batch_index) & _SEED_MASK_64
+        generator = torch.Generator(device="cpu").manual_seed(batch_seed)
+        sample_noise = torch.randn(tensor[batch_index].shape, generator=generator, device="cpu", dtype=torch.float32)
+        if sample_noise.device != tensor.device:
+            sample_noise = sample_noise.to(device=tensor.device)
+        noise[batch_index] = sample_noise.to(dtype=tensor.dtype)
+
+    logger.debug("Generated seeded noise: shape=%s batch=%d seed=%d", tuple(tensor.shape), batch, seed)
+    return noise
+
+
+def _per_sample_std(tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.ndim == 0:
+        std = tensor.detach().float().std(unbiased=False)
+        if not torch.isfinite(std) or std <= 1e-6:
+            return std.new_zeros(())
+        return std
+
+    batch = int(tensor.shape[0])
+    if batch <= 0:
+        raise ValueError("Input tensor batch dimension must be non-empty.")
+
+    flat = tensor.detach().float().reshape(batch, -1)
+    std = flat.std(dim=1, unbiased=False)
+    std = torch.where(torch.isfinite(std), std, torch.zeros_like(std))
+    std = torch.where(std > 1e-6, std, torch.zeros_like(std))
+    return std
 
 
 def _gaussian_kernel1d(kernel_size, sigma, device, dtype):
@@ -1330,12 +1386,23 @@ class LatentAddNoise:
 
         device = _get_device()
         latent_tensor = latent["samples"].clone().to(device)
+        if not latent_tensor.is_floating_point():
+            raise RuntimeError(f"LATENT samples must be floating point, got dtype={latent_tensor.dtype}.")
 
-        generator = torch.Generator(device=device).manual_seed(seed)
-        noise = torch.randn(latent_tensor.shape, generator=generator, device=device, dtype=latent_tensor.dtype)
-
-        latent_std = torch.std(latent_tensor)
-        scaled_noise = noise * latent_std * strength
+        noise = _seeded_gaussian_noise_like(latent_tensor, seed)
+        latent_std = _per_sample_std(latent_tensor)
+        strength_value = float(strength)
+        scale = latent_std * strength_value
+        scale_view = scale.view(int(latent_tensor.shape[0]), *([1] * (latent_tensor.ndim - 1)))
+        scaled_noise = noise * scale_view
+        logger.debug(
+            "LatentAddNoise: batch=%d seed=%d strength=%.4f std_min=%.6f std_max=%.6f",
+            int(latent_tensor.shape[0]),
+            int(seed),
+            strength_value,
+            float(latent_std.min().item()),
+            float(latent_std.max().item()),
+        )
 
         noised_latent = latent_tensor + scaled_noise
 
@@ -1395,12 +1462,23 @@ class ImageAddNoise:
 
         device = _get_device()
         image_tensor = image.clone().to(device)
+        if not image_tensor.is_floating_point():
+            raise RuntimeError(f"IMAGE input must be floating point, got dtype={image_tensor.dtype}.")
 
-        generator = torch.Generator(device=device).manual_seed(seed)
-        noise = torch.randn(image_tensor.shape, generator=generator, device=device, dtype=image_tensor.dtype)
-
-        image_std = torch.std(image_tensor)
-        scaled_noise = noise * image_std * strength
+        noise = _seeded_gaussian_noise_like(image_tensor, seed)
+        image_std = _per_sample_std(image_tensor)
+        strength_value = float(strength)
+        scale = image_std * strength_value
+        scale_view = scale.view(int(image_tensor.shape[0]), *([1] * (image_tensor.ndim - 1)))
+        scaled_noise = noise * scale_view
+        logger.debug(
+            "ImageAddNoise: batch=%d seed=%d strength=%.4f std_min=%.6f std_max=%.6f",
+            int(image_tensor.shape[0]),
+            int(seed),
+            strength_value,
+            float(image_std.min().item()),
+            float(image_std.max().item()),
+        )
 
         noised_image = image_tensor + scaled_noise
 
@@ -2580,6 +2658,8 @@ class LatentForwardDiffusion:
 
         device = _get_device()
         latent_tensor = latent["samples"].clone().to(device)
+        if not latent_tensor.is_floating_point():
+            raise RuntimeError(f"LATENT samples must be floating point, got dtype={latent_tensor.dtype}.")
 
         sigmas = None
         if comfy_samplers is not None and model is not None:
@@ -2595,8 +2675,13 @@ class LatentForwardDiffusion:
 
         sigma = sigmas[start_step].to(device)
 
-        generator = torch.Generator(device=device).manual_seed(seed)
-        noise = torch.randn(latent_tensor.shape, generator=generator, device=device, dtype=latent_tensor.dtype)
+        noise = _seeded_gaussian_noise_like(latent_tensor, seed)
+        logger.debug(
+            "LatentForwardDiffusion: batch=%d seed=%d sigma=%.6f",
+            int(latent_tensor.shape[0]),
+            int(seed),
+            float(sigma),
+        )
 
         noised_latent = latent_tensor + noise * sigma
 
