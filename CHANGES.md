@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.19 - 2026-03-01
+- Fixed intermittent bypass-LoRA CPU/GPU mismatches by synchronizing adapter tensors to the active UNet input device at runtime in `KSampler (LoRA Sigma Inverse)`.
+- Added test coverage for adapter-device synchronization behavior.
+
 ## 1.2.18 - 2026-03-01
 - Added `min_lora_step` and `max_lora_step` to `KSampler (LoRA Sigma Inverse)` to gate LoRA application by step index.
 - Added `-1` unbounded semantics for step gates, so each side defaults to always enabled when set to `-1`.

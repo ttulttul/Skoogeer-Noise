@@ -3049,6 +3049,53 @@ class KSamplerLoraSigmaInverse:
         key_map: Dict[str, Any] = comfy_lora.model_lora_keys_unet(model.model, {})
         return comfy_lora.load_lora(lora, key_map, log_missing=False)
 
+    @staticmethod
+    def _move_adapter_weights_to_device(adapter: Any, device: torch.device) -> None:
+        if isinstance(adapter, torch.nn.Module):
+            adapter.to(device=device)
+            return
+
+        weights = getattr(adapter, "weights", None)
+        if weights is None:
+            return
+
+        def _to_device(value: Any) -> Any:
+            if isinstance(value, torch.Tensor):
+                return value.to(device=device)
+            return value
+
+        if isinstance(weights, tuple):
+            adapter.weights = tuple(_to_device(w) for w in weights)
+        elif isinstance(weights, list):
+            adapter.weights = [_to_device(w) for w in weights]
+        elif isinstance(weights, torch.Tensor):
+            adapter.weights = _to_device(weights)
+
+    def _sync_adapters_to_input_device(
+        self,
+        adapters: Sequence[Any],
+        input_tensor: Any,
+        state: Dict[str, Any],
+    ) -> None:
+        if not isinstance(input_tensor, torch.Tensor):
+            return
+        if len(adapters) <= 0:
+            return
+
+        input_device = input_tensor.device
+        last_device = state.get("last_input_device")
+        if last_device == input_device:
+            return
+
+        for adapter in adapters:
+            self._move_adapter_weights_to_device(adapter, input_device)
+        state["last_input_device"] = input_device
+        logger.debug(
+            "KSamplerLoraSigmaInverse: synchronized %d bypass adapters to device %s.",
+            int(len(adapters)),
+            str(input_device),
+        )
+
     def _split_lora_patches_for_bypass(self, loaded_patches: Dict[Any, Any]) -> Tuple[Dict[str, Any], Dict[Any, Any]]:
         adapter_patches: Dict[str, Any] = {}
         unsupported_patches: Dict[Any, Any] = {}
@@ -3079,7 +3126,7 @@ class KSamplerLoraSigmaInverse:
         max_lora_step: int,
     ) -> None:
         previous_wrapper = model_with_lora.model_options.get("model_function_wrapper")
-        state = {"last_strength": None, "last_step_index": None}
+        state = {"last_strength": None, "last_step_index": None, "last_input_device": None}
 
         def _update_strength_from_timestep(timestep: Any) -> None:
             sigma_tensor = torch.as_tensor(timestep, dtype=torch.float32).flatten()
@@ -3118,6 +3165,11 @@ class KSamplerLoraSigmaInverse:
             state["last_step_index"] = int(step_index)
 
         def _wrapper(model_function, call_args):
+            self._sync_adapters_to_input_device(
+                adapters=adapters,
+                input_tensor=call_args.get("input"),
+                state=state,
+            )
             _update_strength_from_timestep(call_args.get("timestep", 0.0))
 
             if previous_wrapper is not None:

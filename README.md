@@ -980,6 +980,7 @@ You can also gate LoRA application by step index:
 ##### Notes
 
 - This node now prefers ComfyUI's **bypass LoRA injection path** for adapter-based LoRAs, so LoRA weights are injected once and strength is updated at runtime via per-call multipliers (no per-step repatching).
+- The bypass path now also synchronizes adapter tensors to the active UNet input device at runtime, preventing intermittent CPU/GPU mismatch errors on offload-heavy runs.
 - If the LoRA contains non-bypass-compatible patch types, the node falls back to hook keyframe scheduling for correctness.
 - LoRA scheduling here is model-only because `KSampler`-style nodes do not receive a CLIP input.
 

@@ -811,6 +811,25 @@ def test_ksampler_lora_sigma_inverse_builds_percent_schedule():
     assert strengths == pytest.approx([0.0, 0.5, 1.0], abs=1e-6)
 
 
+def test_ksampler_lora_sigma_inverse_syncs_adapter_device_once(monkeypatch):
+    node = qnn.KSamplerLoraSigmaInverse()
+    adapters = [object(), object()]
+    state = {}
+    calls = []
+
+    def patched_move(adapter, device):
+        calls.append((id(adapter), str(device)))
+
+    monkeypatch.setattr(node, "_move_adapter_weights_to_device", patched_move)
+
+    input_tensor = torch.zeros((1, 4, 8, 8), dtype=torch.float32)
+    node._sync_adapters_to_input_device(adapters=adapters, input_tensor=input_tensor, state=state)
+    node._sync_adapters_to_input_device(adapters=adapters, input_tensor=input_tensor, state=state)
+
+    assert len(calls) == 2
+    assert state["last_input_device"] == input_tensor.device
+
+
 def test_ksampler_lora_sigma_inverse_applies_scheduled_hooks(monkeypatch):
     captured = {}
 
