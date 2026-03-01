@@ -2802,6 +2802,16 @@ class KSamplerLoraSigmaInverse:
         strengths = torch.where(torch.isfinite(strengths), strengths, torch.zeros_like(strengths))
         return strengths
 
+    @classmethod
+    def _build_sigma_strength_schedule(
+        cls,
+        sigmas: torch.Tensor,
+        max_lora_strength: float,
+    ) -> List[Tuple[float, float]]:
+        sigma_tensor = torch.as_tensor(sigmas, dtype=torch.float32).flatten()
+        strengths = cls._compute_inverse_sigma_strengths(sigma_tensor, max_lora_strength)
+        return [(float(sigma), float(strength)) for sigma, strength in zip(sigma_tensor.tolist(), strengths.tolist())]
+
     @staticmethod
     def _sigma_to_percent(model_sampling: Any, sigma: float, iterations: int = 32) -> float:
         target_sigma = float(sigma)
@@ -3126,6 +3136,15 @@ class KSamplerLoraSigmaInverse:
                 denoise=denoise,
                 sigmas=sigmas,
             )
+
+        # TEMP debug log requested by user: print full sigma->strength schedule before sampling starts.
+        sigma_strength_schedule = self._build_sigma_strength_schedule(sigmas, max_lora_strength)
+        logger.warning(
+            "[TEMP] KSamplerLoraSigmaInverse schedule lora=%s steps=%d sigma_strength=%s",
+            lora_name,
+            int(len(sigma_strength_schedule)),
+            sigma_strength_schedule,
+        )
 
         lora = self._load_lora(lora_name)
         sigmas_tensor = torch.as_tensor(sigmas, dtype=torch.float32)
