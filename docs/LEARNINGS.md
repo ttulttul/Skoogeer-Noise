@@ -6,3 +6,4 @@
 - README now has a structured node reference with a table of contents, grouped sections, and example visuals.
 - Latent to Image Batch now emits standard ComfyUI BHWC images with optional RGB repetition, and Image Batch to Latent reconstructs latents from channel batches.
 - Batch-aware noise now offsets seeds per sample (`seed + batch index`) so batched outputs stay deterministic and aligned with single-sample runs.
+- ComfyUI hook keyframes can be generated from a sampler's sigma schedule to modulate LoRA strength during a single continuous KSampler pass, avoiding multi-pass step chunking.

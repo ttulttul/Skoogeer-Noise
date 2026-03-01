@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -21,12 +21,26 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
 
 try:
     import comfy.model_management as comfy_model_management  # type: ignore[import-not-found]
+    import comfy.sample as comfy_sample  # type: ignore[import-not-found]
     import comfy.samplers as comfy_samplers  # type: ignore[import-not-found]
+    import comfy.hooks as comfy_hooks  # type: ignore[import-not-found]
     import comfy.utils as comfy_utils  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # pragma: no cover - comfy is only available inside ComfyUI
     comfy_model_management = None
+    comfy_sample = None
     comfy_samplers = None
+    comfy_hooks = None
     comfy_utils = None
+
+try:
+    import folder_paths  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # pragma: no cover - folder_paths exists inside ComfyUI
+    folder_paths = None
+
+try:
+    import latent_preview  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # pragma: no cover - latent_preview exists inside ComfyUI
+    latent_preview = None
 
 logger = logging.getLogger(__name__)
 
@@ -2702,6 +2716,340 @@ class LatentForwardDiffusion:
         return (out,)
 
 
+class KSamplerLoraSigmaInverse:
+    """
+    KSampler variant with an embedded model-only LoRA loader whose strength follows:
+    strength[i] = max_lora_strength * (1 - sigma[i] / max_sigma)
+    """
+
+    def __init__(self):
+        self.loaded_lora = None
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        sampler_names: Sequence[str] = ("euler",)
+        scheduler_names: Sequence[str] = ("normal",)
+        if comfy_samplers is not None:
+            sampler_names = comfy_samplers.KSampler.SAMPLERS
+            scheduler_names = comfy_samplers.KSampler.SCHEDULERS
+
+        lora_names: Sequence[str] = []
+        if folder_paths is not None:
+            lora_names = folder_paths.get_filename_list("loras")
+
+        return {
+            "required": {
+                "model": ("MODEL", {"tooltip": "The model used for denoising the input latent."}),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 0xFFFFFFFFFFFFFFFF,
+                    "control_after_generate": True,
+                    "tooltip": "The random seed used for creating the noise.",
+                }),
+                "steps": ("INT", {"default": 20, "min": 1, "max": 10000, "tooltip": "The number of denoising steps."}),
+                "cfg": ("FLOAT", {
+                    "default": 8.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 0.1,
+                    "round": 0.01,
+                    "tooltip": "Classifier-Free Guidance scale.",
+                }),
+                "sampler_name": (sampler_names, {"tooltip": "Sampling algorithm."}),
+                "scheduler": (scheduler_names, {"tooltip": "Sigma scheduler."}),
+                "positive": ("CONDITIONING", {"tooltip": "Positive conditioning."}),
+                "negative": ("CONDITIONING", {"tooltip": "Negative conditioning."}),
+                "latent_image": ("LATENT", {"tooltip": "The latent image to denoise."}),
+                "lora_name": (lora_names, {"tooltip": "LoRA file to load and schedule over sampling."}),
+                "max_lora_strength": ("FLOAT", {
+                    "default": 1.0,
+                    "min": -100.0,
+                    "max": 100.0,
+                    "step": 0.01,
+                    "tooltip": "Target LoRA strength at the end of sampling when sigma reaches its minimum.",
+                }),
+                "denoise": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "tooltip": "How much of the schedule to run.",
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "sample"
+    CATEGORY = "sampling"
+
+    @staticmethod
+    def _compute_inverse_sigma_strengths(sigmas: torch.Tensor, max_lora_strength: float) -> torch.Tensor:
+        sigma_tensor = torch.as_tensor(sigmas, dtype=torch.float32).flatten()
+        if sigma_tensor.numel() == 0:
+            return sigma_tensor
+
+        sigma_max = float(torch.max(sigma_tensor).item())
+        if not math.isfinite(sigma_max) or sigma_max <= 0.0:
+            return torch.zeros_like(sigma_tensor)
+
+        normalized = torch.clamp(sigma_tensor / sigma_max, min=0.0, max=1.0)
+        strengths = (1.0 - normalized) * float(max_lora_strength)
+        strengths = torch.where(torch.isfinite(strengths), strengths, torch.zeros_like(strengths))
+        return strengths
+
+    @staticmethod
+    def _sigma_to_percent(model_sampling: Any, sigma: float, iterations: int = 32) -> float:
+        target_sigma = float(sigma)
+        if not math.isfinite(target_sigma):
+            return 0.0
+
+        low = 0.0
+        high = 1.0
+        sigma_low = float(model_sampling.percent_to_sigma(low))
+        sigma_high = float(model_sampling.percent_to_sigma(high))
+        decreasing = sigma_low >= sigma_high
+
+        if decreasing:
+            if target_sigma >= sigma_low:
+                return 0.0
+            if target_sigma <= sigma_high:
+                return 1.0
+        else:
+            if target_sigma <= sigma_low:
+                return 0.0
+            if target_sigma >= sigma_high:
+                return 1.0
+
+        for _ in range(max(1, int(iterations))):
+            mid = 0.5 * (low + high)
+            sigma_mid = float(model_sampling.percent_to_sigma(mid))
+
+            if not math.isfinite(sigma_mid):
+                break
+            if math.isclose(sigma_mid, target_sigma, rel_tol=1e-5, abs_tol=1e-6):
+                return max(0.0, min(1.0, mid))
+
+            if decreasing:
+                if sigma_mid > target_sigma:
+                    low = mid
+                else:
+                    high = mid
+            else:
+                if sigma_mid < target_sigma:
+                    low = mid
+                else:
+                    high = mid
+
+        return max(0.0, min(1.0, 0.5 * (low + high)))
+
+    @classmethod
+    def _build_percent_strength_schedule(
+        cls,
+        model_sampling: Any,
+        sigmas: torch.Tensor,
+        max_lora_strength: float,
+    ) -> List[Tuple[float, float]]:
+        sigma_tensor = torch.as_tensor(sigmas, dtype=torch.float32).flatten()
+        strengths = cls._compute_inverse_sigma_strengths(sigma_tensor, max_lora_strength)
+
+        schedule: List[Tuple[float, float]] = []
+        previous_percent = -1.0
+        for sigma_value, strength_value in zip(sigma_tensor.tolist(), strengths.tolist()):
+            percent = cls._sigma_to_percent(model_sampling, float(sigma_value))
+            if percent < previous_percent:
+                percent = previous_percent
+            previous_percent = percent
+            schedule.append((float(percent), float(strength_value)))
+        return schedule
+
+    def _resolve_lora_path(self, lora_name: str) -> str:
+        if folder_paths is None:
+            raise RuntimeError("folder_paths is unavailable. This node only works inside ComfyUI.")
+
+        if hasattr(folder_paths, "get_full_path_or_raise"):
+            return folder_paths.get_full_path_or_raise("loras", lora_name)
+
+        lora_path = folder_paths.get_full_path("loras", lora_name)
+        if not lora_path:
+            raise FileNotFoundError(f"Unable to resolve LoRA path for '{lora_name}'.")
+        return lora_path
+
+    def _load_lora(self, lora_name: str) -> Dict[str, Any]:
+        if comfy_utils is None:
+            raise RuntimeError("comfy.utils is unavailable. This node only works inside ComfyUI.")
+
+        lora_path = self._resolve_lora_path(lora_name)
+        lora = None
+
+        if self.loaded_lora is not None:
+            if self.loaded_lora[0] == lora_path:
+                lora = self.loaded_lora[1]
+            else:
+                self.loaded_lora = None
+
+        if lora is None:
+            lora = comfy_utils.load_torch_file(lora_path, safe_load=True)
+            self.loaded_lora = (lora_path, lora)
+            logger.info("Loaded LoRA '%s' for scheduled sampling.", os.path.basename(lora_path))
+
+        return lora
+
+    def _build_scheduled_model_hook(
+        self,
+        model: Any,
+        lora: Dict[str, Any],
+        sigmas: torch.Tensor,
+        max_lora_strength: float,
+    ):
+        if comfy_hooks is None:
+            raise RuntimeError("comfy.hooks is unavailable. This node only works inside ComfyUI.")
+
+        model_sampling = model.get_model_object("model_sampling")
+        schedule = self._build_percent_strength_schedule(model_sampling, sigmas, max_lora_strength)
+
+        hooks = comfy_hooks.create_hook_lora(lora=lora, strength_model=1.0, strength_clip=0.0)
+        keyframes = comfy_hooks.HookKeyframeGroup()
+        for percent, strength in schedule:
+            keyframes.add(
+                comfy_hooks.HookKeyframe(
+                    strength=float(strength),
+                    start_percent=float(percent),
+                    guarantee_steps=1,
+                )
+            )
+        hooks.set_keyframes_on_hooks(hook_kf=keyframes)
+        return hooks, schedule
+
+    def _sample_like_ksampler(
+        self,
+        model: Any,
+        seed: int,
+        steps: int,
+        cfg: float,
+        sampler_name: str,
+        scheduler: str,
+        positive: Any,
+        negative: Any,
+        latent_image: Dict[str, Any],
+        denoise: float,
+        sigmas: torch.Tensor,
+    ) -> Tuple[Dict[str, Any]]:
+        if comfy_sample is None:
+            raise RuntimeError("comfy.sample is unavailable. This node only works inside ComfyUI.")
+
+        latent_tensor = latent_image["samples"]
+        latent_tensor = comfy_sample.fix_empty_latent_channels(
+            model,
+            latent_tensor,
+            latent_image.get("downscale_ratio_spacial", None),
+        )
+
+        batch_inds = latent_image["batch_index"] if "batch_index" in latent_image else None
+        noise = comfy_sample.prepare_noise(latent_tensor, seed, batch_inds)
+
+        noise_mask = latent_image.get("noise_mask", None)
+        callback = None
+        if latent_preview is not None:
+            try:
+                callback = latent_preview.prepare_callback(model, steps)
+            except Exception:  # pragma: no cover - preview callback is best effort
+                callback = None
+
+        disable_pbar = False
+        if comfy_utils is not None and hasattr(comfy_utils, "PROGRESS_BAR_ENABLED"):
+            disable_pbar = not bool(comfy_utils.PROGRESS_BAR_ENABLED)
+
+        samples = comfy_sample.sample(
+            model,
+            noise,
+            steps,
+            cfg,
+            sampler_name,
+            scheduler,
+            positive,
+            negative,
+            latent_tensor,
+            denoise=denoise,
+            noise_mask=noise_mask,
+            sigmas=sigmas,
+            callback=callback,
+            disable_pbar=disable_pbar,
+            seed=seed,
+        )
+
+        out = latent_image.copy()
+        out.pop("downscale_ratio_spacial", None)
+        out["samples"] = samples
+        return (out,)
+
+    def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, lora_name, max_lora_strength, denoise=1.0):
+        if comfy_samplers is None:
+            raise RuntimeError("comfy.samplers is unavailable. This node only works inside ComfyUI.")
+
+        ksampler = comfy_samplers.KSampler(
+            model,
+            steps=steps,
+            device=model.load_device,
+            sampler=sampler_name,
+            scheduler=scheduler,
+            denoise=denoise,
+            model_options=model.model_options,
+        )
+        sigmas = getattr(ksampler, "sigmas", None)
+        if sigmas is None:
+            sigmas = torch.linspace(1.0, 0.0, steps + 1, device=model.load_device)
+
+        if float(max_lora_strength) == 0.0:
+            return self._sample_like_ksampler(
+                model=model,
+                seed=seed,
+                steps=steps,
+                cfg=cfg,
+                sampler_name=sampler_name,
+                scheduler=scheduler,
+                positive=positive,
+                negative=negative,
+                latent_image=latent_image,
+                denoise=denoise,
+                sigmas=sigmas,
+            )
+
+        lora = self._load_lora(lora_name)
+        hooks, schedule = self._build_scheduled_model_hook(
+            model=model,
+            lora=lora,
+            sigmas=sigmas,
+            max_lora_strength=max_lora_strength,
+        )
+        logger.debug(
+            "KSamplerLoraSigmaInverse: lora=%s steps=%d max_strength=%.4f first_strength=%.4f last_strength=%.4f",
+            lora_name,
+            len(schedule),
+            float(max_lora_strength),
+            float(schedule[0][1]) if schedule else 0.0,
+            float(schedule[-1][1]) if schedule else 0.0,
+        )
+
+        cache: Dict[Tuple[Any, Any], Any] = {}
+        positive_with_hooks = comfy_hooks.set_hooks_for_conditioning(positive, hooks, append_hooks=True, cache=cache)
+        negative_with_hooks = comfy_hooks.set_hooks_for_conditioning(negative, hooks, append_hooks=True, cache=cache)
+
+        return self._sample_like_ksampler(
+            model=model,
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            sampler_name=sampler_name,
+            scheduler=scheduler,
+            positive=positive_with_hooks,
+            negative=negative_with_hooks,
+            latent_image=latent_image,
+            denoise=denoise,
+            sigmas=sigmas,
+        )
+
+
 class ConditioningAddNoise:
     """Adds seeded Gaussian noise to conditioning embeddings and pooled outputs."""
 
@@ -3066,6 +3414,7 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     "ImageFractalBrownianMotion": ImageFractalBrownianMotion,
     "ImageSwirlNoise": ImageSwirlNoise,
     "LatentForwardDiffusion": LatentForwardDiffusion,
+    "KSamplerLoraSigmaInverse": KSamplerLoraSigmaInverse,
     "ConditioningAddNoise": ConditioningAddNoise,
     "ConditioningGaussianBlur": ConditioningGaussianBlur,
     "ConditioningFrequencySplit": ConditioningFrequencySplit,
@@ -3094,6 +3443,7 @@ NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     "ImageFractalBrownianMotion": "Image Fractal Brownian Motion",
     "ImageSwirlNoise": "Image Swirl Noise",
     "LatentForwardDiffusion": "Forward Diffusion (Add Scheduled Noise)",
+    "KSamplerLoraSigmaInverse": "KSampler (LoRA Sigma Inverse)",
     "ConditioningAddNoise": "Conditioning (Add Noise)",
     "ConditioningGaussianBlur": "Conditioning (Gaussian Blur)",
     "ConditioningFrequencySplit": "Conditioning (Frequency Split)",

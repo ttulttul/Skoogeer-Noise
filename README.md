@@ -167,6 +167,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Latent Swirl Noise](#latent-swirl-noise) | `Latent/Noise` | `LATENT` |
 | [Image Swirl Noise](#image-swirl-noise) | `Image/Noise` | `IMAGE` |
 | [Forward Diffusion (Add Scheduled Noise)](#forward-diffusion-add-scheduled-noise) | `Latent/Noise` | `LATENT` |
+| [KSampler (LoRA Sigma Inverse)](#ksampler-lora-sigma-inverse) | `sampling` | `LATENT` |
 | [Unpatchify Flux.2 Latent](#unpatchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Patchify Flux.2 Latent](#patchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Conditioning (Add Noise)](#conditioning-add-noise) | `conditioning/noise` | `CONDITIONING` |
@@ -937,6 +938,42 @@ Adds “sampler-like” scheduled noise to a clean latent, using the model's sig
 
 - When ComfyUI is available, this node pulls `sigmas` from `comfy.samplers.KSampler(model, steps=...)`. Otherwise it falls back to a simple linear sigma schedule.
 - `noise_strength` is mapped to a start step via `start_step = steps - int(steps * noise_strength)`.
+
+---
+
+#### KSampler (LoRA Sigma Inverse)
+
+KSampler-compatible sampler node with an embedded **model-only LoRA loader**.
+The LoRA strength is changed per sigma step using:
+
+`strength[i] = max_lora_strength * (1 - sigma[i] / max(sigma))`
+
+This means LoRA influence starts near zero at high sigma and ramps up as sigma decreases.
+
+- **Menu category:** `sampling`
+- **Returns:** `LATENT`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `model` | `MODEL` | – | – | Diffusion model to denoise with. |
+| `seed` | `INT` | `0` | `0..2^64-1` | Seed for latent noise preparation. |
+| `steps` | `INT` | `20` | `1..10000` | Sampling steps. |
+| `cfg` | `FLOAT` | `8.0` | `0.0..100.0` | CFG scale. |
+| `sampler_name` | enum | `euler` | ComfyUI sampler list | Sampling algorithm. |
+| `scheduler` | enum | `normal` | ComfyUI scheduler list | Sigma schedule family. |
+| `positive` | `CONDITIONING` | – | – | Positive conditioning. |
+| `negative` | `CONDITIONING` | – | – | Negative conditioning. |
+| `latent_image` | `LATENT` | – | – | Input latent. |
+| `lora_name` | enum | first available | LoRA files in `loras` | LoRA to schedule. |
+| `max_lora_strength` | `FLOAT` | `1.0` | `-100.0..100.0` | Final LoRA strength at minimum sigma. |
+| `denoise` | `FLOAT` | `1.0` | `0.0..1.0` | Denoise fraction (same as KSampler). |
+
+##### Notes
+
+- This node uses ComfyUI hooks to apply **per-step LoRA strength scheduling during one continuous sample run**.
+- LoRA scheduling here is model-only because `KSampler`-style nodes do not receive a CLIP input.
 
 ---
 

@@ -749,3 +749,175 @@ def test_conditioning_frequency_merge_mismatched_lengths_raises():
 
     with pytest.raises(ValueError):
         node.merge(low_pass, high_pass, low_gain=1.0, high_gain=1.0)
+
+
+def test_ksampler_lora_sigma_inverse_strength_curve():
+    sigmas = torch.tensor([4.0, 2.0, 1.0, 0.0], dtype=torch.float32)
+
+    strengths = qnn.KSamplerLoraSigmaInverse._compute_inverse_sigma_strengths(sigmas, max_lora_strength=1.5)
+
+    expected = torch.tensor([0.0, 0.75, 1.125, 1.5], dtype=torch.float32)
+    assert torch.allclose(strengths, expected, atol=1e-6)
+
+
+def test_ksampler_lora_sigma_inverse_builds_percent_schedule():
+    class FakeModelSampling:
+        @staticmethod
+        def percent_to_sigma(percent):
+            return 1.0 - float(percent)
+
+    sigmas = torch.tensor([1.0, 0.5, 0.0], dtype=torch.float32)
+    schedule = qnn.KSamplerLoraSigmaInverse._build_percent_strength_schedule(
+        FakeModelSampling(),
+        sigmas=sigmas,
+        max_lora_strength=1.0,
+    )
+
+    percents = [value[0] for value in schedule]
+    strengths = [value[1] for value in schedule]
+
+    assert percents == pytest.approx([0.0, 0.5, 1.0], abs=1e-4)
+    assert strengths == pytest.approx([0.0, 0.5, 1.0], abs=1e-6)
+
+
+def test_ksampler_lora_sigma_inverse_applies_scheduled_hooks(monkeypatch):
+    captured = {}
+
+    class FakeHookKeyframe:
+        def __init__(self, strength, start_percent, guarantee_steps=1):
+            self.strength = strength
+            self.start_percent = start_percent
+            self.guarantee_steps = guarantee_steps
+
+    class FakeHookKeyframeGroup:
+        def __init__(self):
+            self.keyframes = []
+
+        def add(self, keyframe):
+            self.keyframes.append(keyframe)
+
+    class FakeHook:
+        def __init__(self):
+            self.hook_keyframe = None
+
+    class FakeHookGroup:
+        def __init__(self):
+            self.hook = FakeHook()
+
+        def set_keyframes_on_hooks(self, hook_kf):
+            self.hook.hook_keyframe = hook_kf
+
+    class FakeHooksModule:
+        HookKeyframe = FakeHookKeyframe
+        HookKeyframeGroup = FakeHookKeyframeGroup
+
+        @staticmethod
+        def create_hook_lora(lora, strength_model, strength_clip):
+            captured["create_hook_strength_model"] = strength_model
+            captured["create_hook_strength_clip"] = strength_clip
+            captured["create_hook_payload"] = lora
+            return FakeHookGroup()
+
+        @staticmethod
+        def set_hooks_for_conditioning(cond, hooks, append_hooks=True, cache=None):
+            out = []
+            for embedding, metadata in cond:
+                new_meta = dict(metadata)
+                new_meta["hooks"] = hooks
+                out.append([embedding, new_meta])
+            return out
+
+    class FakeSamplerClass:
+        SAMPLERS = ("euler",)
+        SCHEDULERS = ("normal",)
+
+        def __init__(self, model, steps, device, sampler=None, scheduler=None, denoise=None, model_options=None):
+            self.sigmas = torch.tensor([1.0, 0.4, 0.0], dtype=torch.float32)
+
+    class FakeSamplersModule:
+        KSampler = FakeSamplerClass
+
+    class FakeComfySample:
+        @staticmethod
+        def fix_empty_latent_channels(model, latent, downscale_ratio_spacial=None):
+            return latent
+
+        @staticmethod
+        def prepare_noise(latent, seed, batch_inds=None):
+            return torch.zeros_like(latent)
+
+        @staticmethod
+        def sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, **kwargs):
+            captured["positive"] = positive
+            captured["negative"] = negative
+            captured["sigmas"] = kwargs.get("sigmas")
+            return latent_image + 1.0
+
+    class FakeComfyUtils:
+        PROGRESS_BAR_ENABLED = False
+
+        @staticmethod
+        def load_torch_file(path, safe_load=True):
+            captured["loaded_lora_path"] = path
+            return {"loaded": True}
+
+    class FakeFolderPaths:
+        @staticmethod
+        def get_full_path_or_raise(category, filename):
+            assert category == "loras"
+            return f"/virtual/loras/{filename}"
+
+    class FakeModelSampling:
+        @staticmethod
+        def percent_to_sigma(percent):
+            return 1.0 - float(percent)
+
+    class FakeModel:
+        load_device = torch.device("cpu")
+        model_options = {}
+
+        @staticmethod
+        def get_model_object(name):
+            assert name == "model_sampling"
+            return FakeModelSampling()
+
+    monkeypatch.setattr(qnn, "comfy_hooks", FakeHooksModule)
+    monkeypatch.setattr(qnn, "comfy_samplers", FakeSamplersModule)
+    monkeypatch.setattr(qnn, "comfy_sample", FakeComfySample)
+    monkeypatch.setattr(qnn, "comfy_utils", FakeComfyUtils)
+    monkeypatch.setattr(qnn, "folder_paths", FakeFolderPaths)
+    monkeypatch.setattr(qnn, "latent_preview", None)
+
+    node = qnn.KSamplerLoraSigmaInverse()
+    latent = {"samples": torch.zeros((1, 4, 8, 8), dtype=torch.float32)}
+    positive = [[torch.zeros((1, 1, 1), dtype=torch.float32), {}]]
+    negative = [[torch.zeros((1, 1, 1), dtype=torch.float32), {}]]
+
+    (out,) = node.sample(
+        model=FakeModel(),
+        seed=7,
+        steps=2,
+        cfg=8.0,
+        sampler_name="euler",
+        scheduler="normal",
+        positive=positive,
+        negative=negative,
+        latent_image=latent,
+        lora_name="test_lora.safetensors",
+        max_lora_strength=2.0,
+        denoise=1.0,
+    )
+
+    assert torch.allclose(out["samples"], torch.ones_like(latent["samples"]))
+    assert captured["loaded_lora_path"].endswith("/test_lora.safetensors")
+    assert captured["create_hook_strength_model"] == 1.0
+    assert captured["create_hook_strength_clip"] == 0.0
+    assert torch.allclose(captured["sigmas"], torch.tensor([1.0, 0.4, 0.0], dtype=torch.float32))
+
+    positive_hooks = captured["positive"][0][1]["hooks"]
+    keyframes = positive_hooks.hook.hook_keyframe.keyframes
+    strengths = [keyframe.strength for keyframe in keyframes]
+    percents = [keyframe.start_percent for keyframe in keyframes]
+
+    assert strengths == pytest.approx([0.0, 1.2, 2.0], abs=1e-6)
+    assert percents == pytest.approx([0.0, 0.6, 1.0], abs=1e-4)
