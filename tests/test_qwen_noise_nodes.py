@@ -921,3 +921,177 @@ def test_ksampler_lora_sigma_inverse_applies_scheduled_hooks(monkeypatch):
 
     assert strengths == pytest.approx([0.0, 1.2, 2.0], abs=1e-6)
     assert percents == pytest.approx([0.0, 0.6, 1.0], abs=1e-4)
+
+
+def test_ksampler_lora_sigma_inverse_uses_bypass_path(monkeypatch):
+    captured = {
+        "multipliers": [],
+        "set_injections_called": 0,
+        "hook_fallback_called": False,
+    }
+
+    class FakeWeightAdapterBase:
+        def __init__(self):
+            self.multiplier = -1.0
+
+    class FakeBypassInjectionManager:
+        def __init__(self):
+            self.adapters = {}
+            self.hooks = []
+
+        def add_adapter(self, key, adapter, strength=1.0):
+            adapter.multiplier = strength
+            self.adapters[key] = adapter
+
+        def create_injections(self, model):
+            self.hooks = [
+                type("FakeHook", (), {"adapter": adapter})()
+                for adapter in self.adapters.values()
+            ]
+            return ["fake_injection"]
+
+        def get_hook_count(self):
+            return len(self.hooks)
+
+    class FakeWeightAdapterModule:
+        WeightAdapterBase = FakeWeightAdapterBase
+        BypassInjectionManager = FakeBypassInjectionManager
+
+    class FakeComfyLora:
+        @staticmethod
+        def model_lora_keys_unet(model, key_map=None):
+            return {"test_key": "layer.weight"}
+
+        @staticmethod
+        def load_lora(lora, key_map, log_missing=False):
+            return {"layer.weight": FakeWeightAdapterBase()}
+
+    class FakeSamplerClass:
+        SAMPLERS = ("euler",)
+        SCHEDULERS = ("normal",)
+
+        def __init__(self, model, steps, device, sampler=None, scheduler=None, denoise=None, model_options=None):
+            self.sigmas = torch.tensor([1.0, 0.4, 0.0], dtype=torch.float32)
+
+    class FakeSamplersModule:
+        KSampler = FakeSamplerClass
+
+    class FakeComfySample:
+        @staticmethod
+        def fix_empty_latent_channels(model, latent, downscale_ratio_spacial=None):
+            return latent
+
+        @staticmethod
+        def prepare_noise(latent, seed, batch_inds=None):
+            return torch.zeros_like(latent)
+
+        @staticmethod
+        def sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, **kwargs):
+            wrapper = model.model_options.get("model_function_wrapper")
+            assert wrapper is not None
+
+            def fake_apply_model(x, timestep, **extra):
+                adapter = next(iter(model.bypass_manager.adapters.values()))
+                captured["multipliers"].append(float(adapter.multiplier))
+                return x
+
+            wrapper(fake_apply_model, {"input": latent_image, "timestep": torch.tensor([1.0]), "c": {}})
+            wrapper(fake_apply_model, {"input": latent_image, "timestep": torch.tensor([0.25]), "c": {}})
+            return latent_image + 1.0
+
+    class FakeComfyUtils:
+        PROGRESS_BAR_ENABLED = False
+
+        @staticmethod
+        def load_torch_file(path, safe_load=True):
+            return {"loaded": True}
+
+    class FakeFolderPaths:
+        @staticmethod
+        def get_full_path_or_raise(category, filename):
+            return f"/virtual/loras/{filename}"
+
+    class FakeHooks:
+        @staticmethod
+        def set_hooks_for_conditioning(*args, **kwargs):
+            captured["hook_fallback_called"] = True
+            raise AssertionError("Hook fallback should not be used in bypass test")
+
+    class FakeModelInner:
+        @staticmethod
+        def state_dict():
+            return {"layer.weight": torch.zeros((1, 1), dtype=torch.float32)}
+
+    class FakeModel:
+        def __init__(self):
+            self.load_device = torch.device("cpu")
+            self.model_options = {}
+            self.model = FakeModelInner()
+            self.bypass_manager = None
+
+        def clone(self):
+            clone = FakeModel()
+            clone.model_options = dict(self.model_options)
+            return clone
+
+        def set_injections(self, key, injections):
+            captured["set_injections_called"] += 1
+
+        def set_model_unet_function_wrapper(self, wrapper):
+            self.model_options["model_function_wrapper"] = wrapper
+
+    def patched_build_bypass(self, model, adapter_patches, max_sigma, max_lora_strength):
+        model_with_lora = model.clone()
+        manager = FakeBypassInjectionManager()
+        for key, adapter in adapter_patches.items():
+            manager.add_adapter(key, adapter, strength=0.0)
+        injections = manager.create_injections(model_with_lora.model)
+        model_with_lora.set_injections("skoogeer_lora_sigma_inverse", injections)
+        model_with_lora.bypass_manager = manager
+        self._install_bypass_strength_wrapper(
+            model_with_lora=model_with_lora,
+            adapters=[hook.adapter for hook in manager.hooks],
+            max_sigma=max_sigma,
+            max_lora_strength=max_lora_strength,
+        )
+        return model_with_lora, len(manager.hooks), 0
+
+    monkeypatch.setattr(qnn, "comfy_weight_adapter", FakeWeightAdapterModule)
+    monkeypatch.setattr(qnn, "comfy_lora", FakeComfyLora)
+    monkeypatch.setattr(qnn, "comfy_samplers", FakeSamplersModule)
+    monkeypatch.setattr(qnn, "comfy_sample", FakeComfySample)
+    monkeypatch.setattr(qnn, "comfy_utils", FakeComfyUtils)
+    monkeypatch.setattr(qnn, "folder_paths", FakeFolderPaths)
+    monkeypatch.setattr(qnn, "comfy_hooks", FakeHooks)
+    monkeypatch.setattr(qnn, "latent_preview", None)
+    monkeypatch.setattr(
+        qnn.KSamplerLoraSigmaInverse,
+        "_build_bypass_lora_model",
+        patched_build_bypass,
+    )
+
+    node = qnn.KSamplerLoraSigmaInverse()
+    latent = {"samples": torch.zeros((1, 4, 8, 8), dtype=torch.float32)}
+    positive = [[torch.zeros((1, 1, 1), dtype=torch.float32), {}]]
+    negative = [[torch.zeros((1, 1, 1), dtype=torch.float32), {}]]
+
+    (out,) = node.sample(
+        model=FakeModel(),
+        seed=11,
+        steps=2,
+        cfg=7.0,
+        sampler_name="euler",
+        scheduler="normal",
+        positive=positive,
+        negative=negative,
+        latent_image=latent,
+        lora_name="fast.safetensors",
+        max_lora_strength=2.0,
+        denoise=1.0,
+    )
+
+    assert torch.allclose(out["samples"], torch.ones_like(latent["samples"]))
+    assert captured["set_injections_called"] == 1
+    assert captured["hook_fallback_called"] is False
+    assert captured["multipliers"][0] == pytest.approx(0.0, abs=1e-6)
+    assert captured["multipliers"][1] == pytest.approx(1.5, abs=1e-6)

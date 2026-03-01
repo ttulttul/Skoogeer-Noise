@@ -972,7 +972,8 @@ This means LoRA influence starts near zero at high sigma and ramps up as sigma d
 
 ##### Notes
 
-- This node uses ComfyUI hooks to apply **per-step LoRA strength scheduling during one continuous sample run**.
+- This node now prefers ComfyUI's **bypass LoRA injection path** for adapter-based LoRAs, so LoRA weights are injected once and strength is updated at runtime via per-call multipliers (no per-step repatching).
+- If the LoRA contains non-bypass-compatible patch types, the node falls back to hook keyframe scheduling for correctness.
 - LoRA scheduling here is model-only because `KSampler`-style nodes do not receive a CLIP input.
 
 ---

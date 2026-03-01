@@ -21,15 +21,19 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
 
 try:
     import comfy.model_management as comfy_model_management  # type: ignore[import-not-found]
+    import comfy.lora as comfy_lora  # type: ignore[import-not-found]
     import comfy.sample as comfy_sample  # type: ignore[import-not-found]
     import comfy.samplers as comfy_samplers  # type: ignore[import-not-found]
     import comfy.hooks as comfy_hooks  # type: ignore[import-not-found]
+    import comfy.weight_adapter as comfy_weight_adapter  # type: ignore[import-not-found]
     import comfy.utils as comfy_utils  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # pragma: no cover - comfy is only available inside ComfyUI
     comfy_model_management = None
+    comfy_lora = None
     comfy_sample = None
     comfy_samplers = None
     comfy_hooks = None
+    comfy_weight_adapter = None
     comfy_utils = None
 
 try:
@@ -2921,6 +2925,114 @@ class KSamplerLoraSigmaInverse:
         hooks.set_keyframes_on_hooks(hook_kf=keyframes)
         return hooks, schedule
 
+    @staticmethod
+    def _strength_for_sigma(sigma_value: float, max_sigma: float, max_lora_strength: float) -> float:
+        sigma = float(sigma_value)
+        sigma_max = float(max_sigma)
+        if not math.isfinite(sigma) or not math.isfinite(sigma_max) or sigma_max <= 0.0:
+            return 0.0
+
+        normalized = max(0.0, min(1.0, sigma / sigma_max))
+        return float(max_lora_strength) * (1.0 - normalized)
+
+    def _load_unet_lora_patches(self, model: Any, lora: Dict[str, Any]) -> Dict[Any, Any]:
+        if comfy_lora is None:
+            raise RuntimeError("comfy.lora is unavailable. This node only works inside ComfyUI.")
+
+        key_map: Dict[str, Any] = comfy_lora.model_lora_keys_unet(model.model, {})
+        return comfy_lora.load_lora(lora, key_map, log_missing=False)
+
+    def _split_lora_patches_for_bypass(self, loaded_patches: Dict[Any, Any]) -> Tuple[Dict[str, Any], Dict[Any, Any]]:
+        adapter_patches: Dict[str, Any] = {}
+        unsupported_patches: Dict[Any, Any] = {}
+
+        for key, patch in loaded_patches.items():
+            if not isinstance(key, str):
+                unsupported_patches[key] = patch
+                continue
+            if comfy_weight_adapter is None:
+                unsupported_patches[key] = patch
+                continue
+            if isinstance(patch, comfy_weight_adapter.WeightAdapterBase):
+                adapter_patches[key] = patch
+            else:
+                unsupported_patches[key] = patch
+
+        return adapter_patches, unsupported_patches
+
+    def _install_bypass_strength_wrapper(
+        self,
+        model_with_lora: Any,
+        adapters: Sequence[Any],
+        max_sigma: float,
+        max_lora_strength: float,
+    ) -> None:
+        previous_wrapper = model_with_lora.model_options.get("model_function_wrapper")
+        state = {"last_strength": None}
+
+        def _update_strength_from_timestep(timestep: Any) -> None:
+            sigma_tensor = torch.as_tensor(timestep, dtype=torch.float32).flatten()
+            sigma_value = float(sigma_tensor[0].item()) if sigma_tensor.numel() > 0 else 0.0
+            strength = self._strength_for_sigma(sigma_value, max_sigma, max_lora_strength)
+
+            last_strength = state["last_strength"]
+            if last_strength is not None and math.isclose(last_strength, strength, rel_tol=1e-6, abs_tol=1e-6):
+                return
+
+            for adapter in adapters:
+                adapter.multiplier = strength
+            state["last_strength"] = strength
+
+        def _wrapper(model_function, call_args):
+            _update_strength_from_timestep(call_args.get("timestep", 0.0))
+
+            if previous_wrapper is not None:
+                return previous_wrapper(model_function, call_args)
+
+            return model_function(
+                call_args["input"],
+                call_args["timestep"],
+                **call_args["c"],
+            )
+
+        model_with_lora.set_model_unet_function_wrapper(_wrapper)
+
+    def _build_bypass_lora_model(
+        self,
+        model: Any,
+        adapter_patches: Dict[str, Any],
+        max_sigma: float,
+        max_lora_strength: float,
+    ) -> Tuple[Any, int, int]:
+        if comfy_weight_adapter is None:
+            raise RuntimeError("comfy.weight_adapter is unavailable. This node only works inside ComfyUI.")
+
+        model_with_lora = model.clone()
+        manager = comfy_weight_adapter.BypassInjectionManager()
+        model_state_keys = set(model_with_lora.model.state_dict().keys())
+
+        missing_keys = 0
+        for key, adapter in adapter_patches.items():
+            if key in model_state_keys:
+                manager.add_adapter(key, adapter, strength=0.0)
+            else:
+                missing_keys += 1
+
+        injections = manager.create_injections(model_with_lora.model)
+        if manager.get_hook_count() <= 0:
+            raise RuntimeError("Bypass LoRA mode did not produce any injectable hooks for the selected model/LoRA.")
+
+        model_with_lora.set_injections("skoogeer_lora_sigma_inverse", injections)
+        active_adapters = [hook.adapter for hook in manager.hooks]
+        self._install_bypass_strength_wrapper(
+            model_with_lora=model_with_lora,
+            adapters=active_adapters,
+            max_sigma=max_sigma,
+            max_lora_strength=max_lora_strength,
+        )
+
+        return model_with_lora, len(active_adapters), missing_keys
+
     def _sample_like_ksampler(
         self,
         model: Any,
@@ -3016,19 +3128,75 @@ class KSamplerLoraSigmaInverse:
             )
 
         lora = self._load_lora(lora_name)
+        sigmas_tensor = torch.as_tensor(sigmas, dtype=torch.float32)
+        max_sigma = float(torch.max(sigmas_tensor).item()) if sigmas_tensor.numel() > 0 else 0.0
+
+        loaded_patches = None
+        adapter_patches: Dict[str, Any] = {}
+        unsupported_patches: Dict[Any, Any] = {}
+
+        if comfy_lora is not None and comfy_weight_adapter is not None:
+            try:
+                loaded_patches = self._load_unet_lora_patches(model, lora)
+                adapter_patches, unsupported_patches = self._split_lora_patches_for_bypass(loaded_patches)
+            except Exception as exc:
+                logger.warning("Bypass LoRA setup failed, falling back to hook scheduling: %s", exc)
+                loaded_patches = None
+
+        can_use_bypass = (
+            loaded_patches is not None
+            and len(adapter_patches) > 0
+            and len(unsupported_patches) == 0
+        )
+
+        if can_use_bypass:
+            model_with_lora, adapter_count, missing_keys = self._build_bypass_lora_model(
+                model=model,
+                adapter_patches=adapter_patches,
+                max_sigma=max_sigma,
+                max_lora_strength=max_lora_strength,
+            )
+            logger.info(
+                "KSamplerLoraSigmaInverse: using bypass LoRA path (adapters=%d missing=%d lora=%s).",
+                int(adapter_count),
+                int(missing_keys),
+                lora_name,
+            )
+            return self._sample_like_ksampler(
+                model=model_with_lora,
+                seed=seed,
+                steps=steps,
+                cfg=cfg,
+                sampler_name=sampler_name,
+                scheduler=scheduler,
+                positive=positive,
+                negative=negative,
+                latent_image=latent_image,
+                denoise=denoise,
+                sigmas=sigmas,
+            )
+
+        if comfy_hooks is None:
+            raise RuntimeError(
+                "Unable to apply scheduled LoRA: bypass mode was unavailable and comfy.hooks fallback is unavailable."
+            )
+
+        if loaded_patches is not None and len(unsupported_patches) > 0:
+            logger.warning(
+                "KSamplerLoraSigmaInverse: %d non-bypass LoRA patches detected; falling back to hook scheduling.",
+                int(len(unsupported_patches)),
+            )
+
         hooks, schedule = self._build_scheduled_model_hook(
             model=model,
             lora=lora,
             sigmas=sigmas,
             max_lora_strength=max_lora_strength,
         )
-        logger.debug(
-            "KSamplerLoraSigmaInverse: lora=%s steps=%d max_strength=%.4f first_strength=%.4f last_strength=%.4f",
+        logger.info(
+            "KSamplerLoraSigmaInverse: using hook fallback path (steps=%d lora=%s).",
+            int(len(schedule)),
             lora_name,
-            len(schedule),
-            float(max_lora_strength),
-            float(schedule[0][1]) if schedule else 0.0,
-            float(schedule[-1][1]) if schedule else 0.0,
         )
 
         cache: Dict[Tuple[Any, Any], Any] = {}
