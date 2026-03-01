@@ -760,6 +760,19 @@ def test_ksampler_lora_sigma_inverse_strength_curve():
     assert torch.allclose(strengths, expected, atol=1e-6)
 
 
+def test_ksampler_lora_sigma_inverse_strength_curve_with_min():
+    sigmas = torch.tensor([4.0, 2.0, 1.0, 0.0], dtype=torch.float32)
+
+    strengths = qnn.KSamplerLoraSigmaInverse._compute_inverse_sigma_strengths(
+        sigmas,
+        max_lora_strength=1.2,
+        min_lora_strength=0.2,
+    )
+
+    expected = torch.tensor([0.2, 0.7, 0.95, 1.2], dtype=torch.float32)
+    assert torch.allclose(strengths, expected, atol=1e-6)
+
+
 def test_ksampler_lora_sigma_inverse_builds_percent_schedule():
     class FakeModelSampling:
         @staticmethod
@@ -771,6 +784,7 @@ def test_ksampler_lora_sigma_inverse_builds_percent_schedule():
         FakeModelSampling(),
         sigmas=sigmas,
         max_lora_strength=1.0,
+        min_lora_strength=0.0,
     )
 
     percents = [value[0] for value in schedule]
@@ -904,6 +918,7 @@ def test_ksampler_lora_sigma_inverse_applies_scheduled_hooks(monkeypatch):
         negative=negative,
         latent_image=latent,
         lora_name="test_lora.safetensors",
+        min_lora_strength=0.0,
         max_lora_strength=2.0,
         denoise=1.0,
     )
@@ -1040,11 +1055,11 @@ def test_ksampler_lora_sigma_inverse_uses_bypass_path(monkeypatch):
         def set_model_unet_function_wrapper(self, wrapper):
             self.model_options["model_function_wrapper"] = wrapper
 
-    def patched_build_bypass(self, model, adapter_patches, max_sigma, max_lora_strength):
+    def patched_build_bypass(self, model, adapter_patches, max_sigma, max_lora_strength, min_lora_strength):
         model_with_lora = model.clone()
         manager = FakeBypassInjectionManager()
         for key, adapter in adapter_patches.items():
-            manager.add_adapter(key, adapter, strength=0.0)
+            manager.add_adapter(key, adapter, strength=min_lora_strength)
         injections = manager.create_injections(model_with_lora.model)
         model_with_lora.set_injections("skoogeer_lora_sigma_inverse", injections)
         model_with_lora.bypass_manager = manager
@@ -1053,6 +1068,7 @@ def test_ksampler_lora_sigma_inverse_uses_bypass_path(monkeypatch):
             adapters=[hook.adapter for hook in manager.hooks],
             max_sigma=max_sigma,
             max_lora_strength=max_lora_strength,
+            min_lora_strength=min_lora_strength,
         )
         return model_with_lora, len(manager.hooks), 0
 
@@ -1086,6 +1102,7 @@ def test_ksampler_lora_sigma_inverse_uses_bypass_path(monkeypatch):
         negative=negative,
         latent_image=latent,
         lora_name="fast.safetensors",
+        min_lora_strength=0.0,
         max_lora_strength=2.0,
         denoise=1.0,
     )

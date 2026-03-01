@@ -2723,7 +2723,7 @@ class LatentForwardDiffusion:
 class KSamplerLoraSigmaInverse:
     """
     KSampler variant with an embedded model-only LoRA loader whose strength follows:
-    strength[i] = max_lora_strength * (1 - sigma[i] / max_sigma)
+    strength[i] = min_lora_strength + (max_lora_strength - min_lora_strength) * (1 - sigma[i] / max_sigma)
     """
 
     def __init__(self):
@@ -2766,6 +2766,13 @@ class KSamplerLoraSigmaInverse:
                 "negative": ("CONDITIONING", {"tooltip": "Negative conditioning."}),
                 "latent_image": ("LATENT", {"tooltip": "The latent image to denoise."}),
                 "lora_name": (lora_names, {"tooltip": "LoRA file to load and schedule over sampling."}),
+                "min_lora_strength": ("FLOAT", {
+                    "default": 0.0,
+                    "min": -100.0,
+                    "max": 100.0,
+                    "step": 0.01,
+                    "tooltip": "Starting LoRA strength at the beginning of sampling (highest sigma).",
+                }),
                 "max_lora_strength": ("FLOAT", {
                     "default": 1.0,
                     "min": -100.0,
@@ -2788,17 +2795,22 @@ class KSamplerLoraSigmaInverse:
     CATEGORY = "sampling"
 
     @staticmethod
-    def _compute_inverse_sigma_strengths(sigmas: torch.Tensor, max_lora_strength: float) -> torch.Tensor:
+    def _compute_inverse_sigma_strengths(
+        sigmas: torch.Tensor,
+        max_lora_strength: float,
+        min_lora_strength: float = 0.0,
+    ) -> torch.Tensor:
         sigma_tensor = torch.as_tensor(sigmas, dtype=torch.float32).flatten()
         if sigma_tensor.numel() == 0:
             return sigma_tensor
 
         sigma_max = float(torch.max(sigma_tensor).item())
         if not math.isfinite(sigma_max) or sigma_max <= 0.0:
-            return torch.zeros_like(sigma_tensor)
+            return torch.full_like(sigma_tensor, float(min_lora_strength))
 
         normalized = torch.clamp(sigma_tensor / sigma_max, min=0.0, max=1.0)
-        strengths = (1.0 - normalized) * float(max_lora_strength)
+        strength_range = float(max_lora_strength) - float(min_lora_strength)
+        strengths = float(min_lora_strength) + (1.0 - normalized) * strength_range
         strengths = torch.where(torch.isfinite(strengths), strengths, torch.zeros_like(strengths))
         return strengths
 
@@ -2853,9 +2865,14 @@ class KSamplerLoraSigmaInverse:
         model_sampling: Any,
         sigmas: torch.Tensor,
         max_lora_strength: float,
+        min_lora_strength: float = 0.0,
     ) -> List[Tuple[float, float]]:
         sigma_tensor = torch.as_tensor(sigmas, dtype=torch.float32).flatten()
-        strengths = cls._compute_inverse_sigma_strengths(sigma_tensor, max_lora_strength)
+        strengths = cls._compute_inverse_sigma_strengths(
+            sigma_tensor,
+            max_lora_strength=max_lora_strength,
+            min_lora_strength=min_lora_strength,
+        )
 
         schedule: List[Tuple[float, float]] = []
         previous_percent = -1.0
@@ -2905,12 +2922,18 @@ class KSamplerLoraSigmaInverse:
         lora: Dict[str, Any],
         sigmas: torch.Tensor,
         max_lora_strength: float,
+        min_lora_strength: float,
     ):
         if comfy_hooks is None:
             raise RuntimeError("comfy.hooks is unavailable. This node only works inside ComfyUI.")
 
         model_sampling = model.get_model_object("model_sampling")
-        schedule = self._build_percent_strength_schedule(model_sampling, sigmas, max_lora_strength)
+        schedule = self._build_percent_strength_schedule(
+            model_sampling,
+            sigmas,
+            max_lora_strength=max_lora_strength,
+            min_lora_strength=min_lora_strength,
+        )
 
         hooks = comfy_hooks.create_hook_lora(lora=lora, strength_model=1.0, strength_clip=0.0)
         keyframes = comfy_hooks.HookKeyframeGroup()
@@ -2926,14 +2949,20 @@ class KSamplerLoraSigmaInverse:
         return hooks, schedule
 
     @staticmethod
-    def _strength_for_sigma(sigma_value: float, max_sigma: float, max_lora_strength: float) -> float:
+    def _strength_for_sigma(
+        sigma_value: float,
+        max_sigma: float,
+        max_lora_strength: float,
+        min_lora_strength: float = 0.0,
+    ) -> float:
         sigma = float(sigma_value)
         sigma_max = float(max_sigma)
         if not math.isfinite(sigma) or not math.isfinite(sigma_max) or sigma_max <= 0.0:
-            return 0.0
+            return float(min_lora_strength)
 
         normalized = max(0.0, min(1.0, sigma / sigma_max))
-        return float(max_lora_strength) * (1.0 - normalized)
+        strength_range = float(max_lora_strength) - float(min_lora_strength)
+        return float(min_lora_strength) + strength_range * (1.0 - normalized)
 
     def _load_unet_lora_patches(self, model: Any, lora: Dict[str, Any]) -> Dict[Any, Any]:
         if comfy_lora is None:
@@ -2966,6 +2995,7 @@ class KSamplerLoraSigmaInverse:
         adapters: Sequence[Any],
         max_sigma: float,
         max_lora_strength: float,
+        min_lora_strength: float,
     ) -> None:
         previous_wrapper = model_with_lora.model_options.get("model_function_wrapper")
         state = {"last_strength": None}
@@ -2973,7 +3003,12 @@ class KSamplerLoraSigmaInverse:
         def _update_strength_from_timestep(timestep: Any) -> None:
             sigma_tensor = torch.as_tensor(timestep, dtype=torch.float32).flatten()
             sigma_value = float(sigma_tensor[0].item()) if sigma_tensor.numel() > 0 else 0.0
-            strength = self._strength_for_sigma(sigma_value, max_sigma, max_lora_strength)
+            strength = self._strength_for_sigma(
+                sigma_value,
+                max_sigma,
+                max_lora_strength,
+                min_lora_strength=min_lora_strength,
+            )
 
             last_strength = state["last_strength"]
             if last_strength is not None and math.isclose(last_strength, strength, rel_tol=1e-6, abs_tol=1e-6):
@@ -3003,6 +3038,7 @@ class KSamplerLoraSigmaInverse:
         adapter_patches: Dict[str, Any],
         max_sigma: float,
         max_lora_strength: float,
+        min_lora_strength: float,
     ) -> Tuple[Any, int, int]:
         if comfy_weight_adapter is None:
             raise RuntimeError("comfy.weight_adapter is unavailable. This node only works inside ComfyUI.")
@@ -3014,7 +3050,7 @@ class KSamplerLoraSigmaInverse:
         missing_keys = 0
         for key, adapter in adapter_patches.items():
             if key in model_state_keys:
-                manager.add_adapter(key, adapter, strength=0.0)
+                manager.add_adapter(key, adapter, strength=float(min_lora_strength))
             else:
                 missing_keys += 1
 
@@ -3029,6 +3065,7 @@ class KSamplerLoraSigmaInverse:
             adapters=active_adapters,
             max_sigma=max_sigma,
             max_lora_strength=max_lora_strength,
+            min_lora_strength=min_lora_strength,
         )
 
         return model_with_lora, len(active_adapters), missing_keys
@@ -3095,7 +3132,22 @@ class KSamplerLoraSigmaInverse:
         out["samples"] = samples
         return (out,)
 
-    def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, lora_name, max_lora_strength, denoise=1.0):
+    def sample(
+        self,
+        model,
+        seed,
+        steps,
+        cfg,
+        sampler_name,
+        scheduler,
+        positive,
+        negative,
+        latent_image,
+        lora_name,
+        min_lora_strength,
+        max_lora_strength,
+        denoise=1.0,
+    ):
         if comfy_samplers is None:
             raise RuntimeError("comfy.samplers is unavailable. This node only works inside ComfyUI.")
 
@@ -3112,7 +3164,7 @@ class KSamplerLoraSigmaInverse:
         if sigmas is None:
             sigmas = torch.linspace(1.0, 0.0, steps + 1, device=model.load_device)
 
-        if float(max_lora_strength) == 0.0:
+        if float(min_lora_strength) == 0.0 and float(max_lora_strength) == 0.0:
             return self._sample_like_ksampler(
                 model=model,
                 seed=seed,
@@ -3155,11 +3207,14 @@ class KSamplerLoraSigmaInverse:
                 adapter_patches=adapter_patches,
                 max_sigma=max_sigma,
                 max_lora_strength=max_lora_strength,
+                min_lora_strength=min_lora_strength,
             )
             logger.info(
-                "KSamplerLoraSigmaInverse: using bypass LoRA path (adapters=%d missing=%d lora=%s).",
+                "KSamplerLoraSigmaInverse: using bypass LoRA path (adapters=%d missing=%d min=%.4f max=%.4f lora=%s).",
                 int(adapter_count),
                 int(missing_keys),
+                float(min_lora_strength),
+                float(max_lora_strength),
                 lora_name,
             )
             return self._sample_like_ksampler(
@@ -3192,10 +3247,13 @@ class KSamplerLoraSigmaInverse:
             lora=lora,
             sigmas=sigmas,
             max_lora_strength=max_lora_strength,
+            min_lora_strength=min_lora_strength,
         )
         logger.info(
-            "KSamplerLoraSigmaInverse: using hook fallback path (steps=%d lora=%s).",
+            "KSamplerLoraSigmaInverse: using hook fallback path (steps=%d min=%.4f max=%.4f lora=%s).",
             int(len(schedule)),
+            float(min_lora_strength),
+            float(max_lora_strength),
             lora_name,
         )
 

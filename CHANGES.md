@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.16 - 2026-03-01
+- Added `min_lora_strength` to `KSampler (LoRA Sigma Inverse)` so LoRA strength can interpolate from a non-zero (or negative) start value to `max_lora_strength` across the sigma schedule.
+
 ## 1.2.14 - 2026-03-01
 - Optimized `KSampler (LoRA Sigma Inverse)` to prefer one-time bypass LoRA injection with runtime multiplier updates, avoiding per-step LoRA repatching for adapter-based LoRAs.
 - Added bypass-path test coverage and retained hook-scheduling fallback for non-bypass-compatible LoRA patch types.
