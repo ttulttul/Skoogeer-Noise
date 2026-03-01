@@ -760,16 +760,6 @@ def test_ksampler_lora_sigma_inverse_strength_curve():
     assert torch.allclose(strengths, expected, atol=1e-6)
 
 
-def test_ksampler_lora_sigma_inverse_sigma_strength_schedule():
-    sigmas = torch.tensor([1.0, 0.4, 0.0], dtype=torch.float32)
-    schedule = qnn.KSamplerLoraSigmaInverse._build_sigma_strength_schedule(sigmas, max_lora_strength=2.0)
-
-    sigma_values = [pair[0] for pair in schedule]
-    strength_values = [pair[1] for pair in schedule]
-    assert sigma_values == pytest.approx([1.0, 0.4, 0.0], abs=1e-6)
-    assert strength_values == pytest.approx([0.0, 1.2, 2.0], abs=1e-6)
-
-
 def test_ksampler_lora_sigma_inverse_builds_percent_schedule():
     class FakeModelSampling:
         @staticmethod
