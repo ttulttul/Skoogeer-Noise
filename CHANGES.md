@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.18 - 2026-03-01
+- Added `min_lora_step` and `max_lora_step` to `KSampler (LoRA Sigma Inverse)` to gate LoRA application by step index.
+- Added `-1` unbounded semantics for step gates, so each side defaults to always enabled when set to `-1`.
+
 ## 1.2.16 - 2026-03-01
 - Added `min_lora_strength` to `KSampler (LoRA Sigma Inverse)` so LoRA strength can interpolate from a non-zero (or negative) start value to `max_lora_strength` across the sigma schedule.
 

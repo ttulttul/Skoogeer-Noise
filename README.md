@@ -949,6 +949,10 @@ The LoRA strength is changed per sigma step using:
 `strength[i] = min_lora_strength + (max_lora_strength - min_lora_strength) * (1 - sigma[i] / max(sigma))`
 
 This means LoRA influence starts at `min_lora_strength` at high sigma and moves toward `max_lora_strength` as sigma decreases.
+You can also gate LoRA application by step index:
+- If `i < min_lora_step`, effective strength is `0`.
+- If `i > max_lora_step`, effective strength is `0`.
+- `-1` for either bound disables that bound (always enabled on that side).
 
 - **Menu category:** `sampling`
 - **Returns:** `LATENT`
@@ -969,6 +973,8 @@ This means LoRA influence starts at `min_lora_strength` at high sigma and moves 
 | `lora_name` | enum | first available | LoRA files in `loras` | LoRA to schedule. |
 | `min_lora_strength` | `FLOAT` | `0.0` | `-100.0..100.0` | Starting LoRA strength at maximum sigma. |
 | `max_lora_strength` | `FLOAT` | `1.0` | `-100.0..100.0` | Final LoRA strength at minimum sigma. |
+| `min_lora_step` | `INT` | `-1` | `-1..10000` | First enabled step index; `-1` = no lower bound. |
+| `max_lora_step` | `INT` | `-1` | `-1..10000` | Last enabled step index; `-1` = no upper bound. |
 | `denoise` | `FLOAT` | `1.0` | `0.0..1.0` | Denoise fraction (same as KSampler). |
 
 ##### Notes
