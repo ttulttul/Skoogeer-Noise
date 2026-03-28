@@ -976,6 +976,156 @@ def test_ksampler_lora_sigma_inverse_applies_scheduled_hooks(monkeypatch):
     assert percents == pytest.approx([0.0, 0.6, 1.0], abs=1e-4)
 
 
+def test_ksampler_lora_sigma_inverse_preserves_batched_latent_outputs(monkeypatch):
+    captured = {}
+
+    class FakeHookKeyframe:
+        def __init__(self, strength, start_percent, guarantee_steps=1):
+            self.strength = strength
+            self.start_percent = start_percent
+            self.guarantee_steps = guarantee_steps
+
+    class FakeHookKeyframeGroup:
+        def __init__(self):
+            self.keyframes = []
+
+        def add(self, keyframe):
+            self.keyframes.append(keyframe)
+
+    class FakeHook:
+        def __init__(self):
+            self.hook_keyframe = None
+
+    class FakeHookGroup:
+        def __init__(self):
+            self.hook = FakeHook()
+
+        def set_keyframes_on_hooks(self, hook_kf):
+            self.hook.hook_keyframe = hook_kf
+
+    class FakeHooksModule:
+        HookKeyframe = FakeHookKeyframe
+        HookKeyframeGroup = FakeHookKeyframeGroup
+
+        @staticmethod
+        def create_hook_lora(lora, strength_model, strength_clip):
+            return FakeHookGroup()
+
+        @staticmethod
+        def set_hooks_for_conditioning(cond, hooks, append_hooks=True, cache=None):
+            out = []
+            for embedding, metadata in cond:
+                new_meta = dict(metadata)
+                new_meta["hooks"] = hooks
+                out.append([embedding, new_meta])
+            return out
+
+    class FakeSamplerClass:
+        SAMPLERS = ("euler",)
+        SCHEDULERS = ("normal",)
+
+        def __init__(self, model, steps, device, sampler=None, scheduler=None, denoise=None, model_options=None):
+            self.sigmas = torch.tensor([1.0, 0.4, 0.0], dtype=torch.float32)
+
+    class FakeSamplersModule:
+        KSampler = FakeSamplerClass
+
+    class FakeComfySample:
+        @staticmethod
+        def fix_empty_latent_channels(model, latent, downscale_ratio_spacial=None):
+            captured["fixed_shape"] = tuple(latent.shape)
+            return latent
+
+        @staticmethod
+        def prepare_noise(latent, seed, batch_inds=None):
+            captured["prepare_noise_shape"] = tuple(latent.shape)
+            captured["prepare_noise_batch_inds"] = list(batch_inds) if batch_inds is not None else None
+            return torch.zeros_like(latent)
+
+        @staticmethod
+        def sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, **kwargs):
+            captured["sample_noise_shape"] = tuple(noise.shape)
+            captured["sample_latent_shape"] = tuple(latent_image.shape)
+            captured["positive_shape"] = tuple(positive[0][0].shape)
+            captured["negative_shape"] = tuple(negative[0][0].shape)
+            offsets = torch.arange(latent_image.shape[0], dtype=latent_image.dtype).view(-1, 1, 1, 1)
+            return latent_image + offsets
+
+    class FakeComfyUtils:
+        PROGRESS_BAR_ENABLED = False
+
+        @staticmethod
+        def load_torch_file(path, safe_load=True):
+            return {"loaded": True}
+
+    class FakeFolderPaths:
+        @staticmethod
+        def get_full_path_or_raise(category, filename):
+            assert category == "loras"
+            return f"/virtual/loras/{filename}"
+
+    class FakeModelSampling:
+        @staticmethod
+        def percent_to_sigma(percent):
+            return 1.0 - float(percent)
+
+    class FakeModel:
+        load_device = torch.device("cpu")
+        model_options = {}
+
+        @staticmethod
+        def get_model_object(name):
+            assert name == "model_sampling"
+            return FakeModelSampling()
+
+    monkeypatch.setattr(qnn, "comfy_hooks", FakeHooksModule)
+    monkeypatch.setattr(qnn, "comfy_samplers", FakeSamplersModule)
+    monkeypatch.setattr(qnn, "comfy_sample", FakeComfySample)
+    monkeypatch.setattr(qnn, "comfy_utils", FakeComfyUtils)
+    monkeypatch.setattr(qnn, "folder_paths", FakeFolderPaths)
+    monkeypatch.setattr(qnn, "latent_preview", None)
+
+    node = qnn.KSamplerLoraSigmaInverse()
+    latent = {
+        "samples": torch.zeros((2, 4, 8, 8), dtype=torch.float32),
+        "batch_index": [5, 6],
+        "noise_mask": torch.ones((2, 8, 8), dtype=torch.float32),
+    }
+    positive = [[torch.zeros((2, 1, 1), dtype=torch.float32), {}]]
+    negative = [[torch.zeros((2, 1, 1), dtype=torch.float32), {}]]
+
+    (out,) = node.sample(
+        model=FakeModel(),
+        seed=7,
+        steps=2,
+        cfg=8.0,
+        sampler_name="euler",
+        scheduler="normal",
+        positive=positive,
+        negative=negative,
+        latent_image=latent,
+        lora_name="test_lora.safetensors",
+        min_lora_strength=0.0,
+        max_lora_strength=2.0,
+        min_lora_step=-1,
+        max_lora_step=-1,
+        denoise=1.0,
+    )
+
+    assert out is not latent
+    assert out["batch_index"] == [5, 6]
+    assert tuple(out["samples"].shape) == (2, 4, 8, 8)
+    assert torch.allclose(out["samples"][0], torch.zeros((4, 8, 8), dtype=torch.float32))
+    assert torch.allclose(out["samples"][1], torch.ones((4, 8, 8), dtype=torch.float32))
+    assert captured["fixed_shape"] == (2, 4, 8, 8)
+    assert captured["prepare_noise_shape"] == (2, 4, 8, 8)
+    assert captured["prepare_noise_batch_inds"] == [5, 6]
+    assert captured["sample_noise_shape"] == (2, 4, 8, 8)
+    assert captured["sample_latent_shape"] == (2, 4, 8, 8)
+    assert captured["positive_shape"] == (2, 1, 1)
+    assert captured["negative_shape"] == (2, 1, 1)
+
+
 def test_ksampler_lora_sigma_inverse_uses_bypass_path(monkeypatch):
     captured = {
         "multipliers": [],
