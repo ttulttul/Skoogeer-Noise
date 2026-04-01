@@ -13,3 +13,4 @@
 - In bypass LoRA mode, adapter tensors may need runtime device re-sync to match active UNet execution device and avoid intermittent CPU/GPU mismatch errors.
 - RotorQuant targets LLM KV-cache compression, so the practical ComfyUI adaptation is a model patch that injects a rotor-style attention override into `transformer_options`, not a custom sampler or a direct port of the KV quantizer.
 - For image diffusion, RotorQuant-style rank reduction (`keep_components < 3`) degrades quality badly enough that it is better treated as unsupported; the TurboQuant-style quantization path is the more appropriate place for lossy attention experiments.
+- Attention-patch experiments need explicit runtime instrumentation; without per-reason skip counters and periodic summaries, it is too easy to mistake silent gating/fallback for a working approximation.

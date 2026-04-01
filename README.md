@@ -1086,12 +1086,15 @@ Like the RotorQuant node, this is a ComfyUI attention patch rather than a litera
 | `rotation_seed` | `INT` | `0` | `0..2^64-1` | Seed used for the random orthogonal rotation and Gaussian residual projection. |
 | `max_head_dim` | `INT` | `256` | `1..4096` | Skip unusually large heads if the projection overhead would likely dominate. |
 | `force_fp32` | enum | `disable` | `disable/enable` | Optionally run the patched q/k/v path in fp32 for extra stability. |
+| `log_every` | `INT` | `50` | `0..1000000` | Emit a TurboQuant runtime summary every N attention calls. `1` gives per-call summaries; `0` disables periodic summaries. |
+| `log_fallbacks` | enum | `disable` | `enable/disable` | Log individual skip and exception fallback reasons when TurboQuant does not activate. |
 
 ##### Notes
 
 - This node is the closer match to the original TurboQuant recipe than the RotorQuant node.
 - The implementation uses a deterministic random orthogonal rotation per head, scalar quantize/dequantize on rotated coordinates, and an optional QJL-style residual correction term on the logits path.
 - In ComfyUI this is still an attention override, not persistent KV-cache compression, so expect approximation tradeoffs rather than the exact runtime profile reported for LLM serving.
+- For debugging, set `log_every = 1` to get immediate runtime summaries and `log_fallbacks = enable` to see why calls were skipped. The module also exposes `get_turboquant_stats()` / `reset_turboquant_stats()` for programmatic inspection.
 
 ---
 

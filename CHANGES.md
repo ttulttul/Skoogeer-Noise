@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.23 - 2026-04-01
+- Added TurboQuant runtime instrumentation with applied/fallback counters, per-reason skip tracking, periodic summary logging, and optional per-fallback logging.
+- Added `log_every` and `log_fallbacks` controls to `Model (TurboQuant Attention)` and test coverage for the new stats behavior.
+
 ## 1.2.22 - 2026-04-01
 - Added `Model (TurboQuant Attention)`, a second `MODEL` patch node that applies a TurboQuant-inspired attention override with random orthogonal rotation, scalar quantization, and optional QJL-style residual correction on logits.
 - Locked `Model (RotorQuant Attention)` back to `keep_components=3` because the lossy `1`/`2` component variants produced poor image quality in practice.

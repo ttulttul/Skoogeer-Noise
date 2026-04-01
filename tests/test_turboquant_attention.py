@@ -45,6 +45,7 @@ def exact_attention(
 
 
 def test_turboquant_attention_quantized_path_preserves_shape_and_finiteness():
+    tqa.reset_turboquant_stats()
     torch.manual_seed(3)
     q = torch.randn((2, 4, 17, 12), dtype=torch.float32)
     k = torch.randn((2, 4, 17, 12), dtype=torch.float32)
@@ -78,9 +79,14 @@ def test_turboquant_attention_quantized_path_preserves_shape_and_finiteness():
 
     assert out.shape == q.shape
     assert torch.isfinite(out).all()
+    stats = tqa.get_turboquant_stats()
+    assert stats["calls"] == 1
+    assert stats["applied_calls"] == 1
+    assert stats["fallback_calls"] == 0
 
 
 def test_turboquant_attention_uses_delegate_override_when_gated_off():
+    tqa.reset_turboquant_stats()
     called = {"delegate": 0}
 
     def delegate_override(original_func, *args, **kwargs):
@@ -119,6 +125,11 @@ def test_turboquant_attention_uses_delegate_override_when_gated_off():
 
     assert called["delegate"] == 1
     assert torch.all(out == 5.0)
+    stats = tqa.get_turboquant_stats()
+    assert stats["calls"] == 1
+    assert stats["applied_calls"] == 0
+    assert stats["fallback_calls"] == 1
+    assert stats["fallback_reasons"]["scope_filtered"] == 1
 
 
 def test_turboquant_model_patch_clones_and_installs_override_without_mutating_source():
@@ -155,6 +166,8 @@ def test_turboquant_model_patch_clones_and_installs_override_without_mutating_so
         rotation_seed=77,
         max_head_dim=192,
         force_fp32="enable",
+        log_every=7,
+        log_fallbacks="enable",
     )
 
     assert patched is not source
@@ -175,10 +188,13 @@ def test_turboquant_model_patch_clones_and_installs_override_without_mutating_so
     assert patched_transformer_options["turboquant_attention"]["rotation_seed"] == 77
     assert patched_transformer_options["turboquant_attention"]["max_head_dim"] == 192
     assert patched_transformer_options["turboquant_attention"]["force_fp32"] is True
+    assert patched_transformer_options["turboquant_attention"]["log_every"] == 7
+    assert patched_transformer_options["turboquant_attention"]["log_fallbacks"] is True
     assert patched_transformer_options["turboquant_attention"][tqa._DELEGATE_OVERRIDE_KEY] is previous_override
 
 
 def test_turboquant_attention_respects_min_token_product_gate():
+    tqa.reset_turboquant_stats()
     q = torch.randn((1, 2, 4, 8), dtype=torch.float32)
     k = torch.randn((1, 2, 4, 8), dtype=torch.float32)
     v = torch.randn((1, 2, 4, 8), dtype=torch.float32)
@@ -211,3 +227,8 @@ def test_turboquant_attention_respects_min_token_product_gate():
     )
 
     assert torch.allclose(out, baseline, atol=1e-6, rtol=1e-6)
+    stats = tqa.get_turboquant_stats()
+    assert stats["calls"] == 1
+    assert stats["applied_calls"] == 0
+    assert stats["fallback_calls"] == 1
+    assert stats["fallback_reasons"]["token_product_below_min"] == 1

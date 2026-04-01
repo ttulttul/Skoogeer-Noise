@@ -29,6 +29,56 @@ class TurboQuantAttentionConfig:
     rotation_seed: int = 0
     max_head_dim: int = 256
     force_fp32: bool = False
+    log_every: int = 50
+    log_fallbacks: bool = False
+
+
+_GLOBAL_STATS: Dict[str, Any] = {
+    "calls": 0,
+    "applied_calls": 0,
+    "fallback_calls": 0,
+    "fallback_reasons": {},
+}
+
+
+def reset_turboquant_stats() -> None:
+    _GLOBAL_STATS["calls"] = 0
+    _GLOBAL_STATS["applied_calls"] = 0
+    _GLOBAL_STATS["fallback_calls"] = 0
+    _GLOBAL_STATS["fallback_reasons"] = {}
+
+
+def get_turboquant_stats() -> Dict[str, Any]:
+    return {
+        "calls": int(_GLOBAL_STATS["calls"]),
+        "applied_calls": int(_GLOBAL_STATS["applied_calls"]),
+        "fallback_calls": int(_GLOBAL_STATS["fallback_calls"]),
+        "fallback_reasons": dict(_GLOBAL_STATS["fallback_reasons"]),
+    }
+
+
+def _update_stats(*, applied: bool = False, reason: Optional[str] = None) -> None:
+    _GLOBAL_STATS["calls"] += 1
+    if applied:
+        _GLOBAL_STATS["applied_calls"] += 1
+    if reason is not None:
+        _GLOBAL_STATS["fallback_calls"] += 1
+        reasons = _GLOBAL_STATS["fallback_reasons"]
+        reasons[reason] = int(reasons.get(reason, 0)) + 1
+
+
+def _maybe_log_stats(cfg: TurboQuantAttentionConfig) -> None:
+    log_every = int(cfg.log_every)
+    calls = int(_GLOBAL_STATS["calls"])
+    if log_every <= 0 or calls <= 0 or (calls % log_every) != 0:
+        return
+    logger.info(
+        "TurboQuant attention stats: calls=%d applied=%d fallbacks=%d reasons=%s",
+        calls,
+        int(_GLOBAL_STATS["applied_calls"]),
+        int(_GLOBAL_STATS["fallback_calls"]),
+        dict(_GLOBAL_STATS["fallback_reasons"]),
+    )
 
 
 def _delegate_or_original(
@@ -63,6 +113,8 @@ def _resolve_config(config_dict: Optional[Dict[str, Any]]) -> TurboQuantAttentio
         rotation_seed=int(config_dict.get("rotation_seed", 0)),
         max_head_dim=max(1, int(config_dict.get("max_head_dim", 256))),
         force_fp32=bool(config_dict.get("force_fp32", False)),
+        log_every=max(0, int(config_dict.get("log_every", 50))),
+        log_fallbacks=bool(config_dict.get("log_fallbacks", False)),
     )
 
 
@@ -209,6 +261,8 @@ def turboquant_attention_override(original_func: Callable[..., torch.Tensor], *a
     delegate_override = config_dict.get(_DELEGATE_OVERRIDE_KEY) if isinstance(config_dict, dict) else None
     cfg = _resolve_config(config_dict)
     if not cfg.enabled:
+        _update_stats(reason="disabled")
+        _maybe_log_stats(cfg)
         return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
 
     try:
@@ -225,17 +279,53 @@ def turboquant_attention_override(original_func: Callable[..., torch.Tensor], *a
         v_expanded = _reshape_for_attention(v, heads=heads, skip_reshape=skip_reshape)
 
         if q_expanded.shape[-1] != k_expanded.shape[-1] or k_expanded.shape[-1] != v_expanded.shape[-1]:
+            _update_stats(reason="shape_mismatch")
+            if cfg.log_fallbacks:
+                logger.info("TurboQuant attention skip: shape mismatch q=%s k=%s v=%s", tuple(q_expanded.shape), tuple(k_expanded.shape), tuple(v_expanded.shape))
+            _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
 
         _, _, query_tokens, dim_head = q_expanded.shape
         key_tokens = int(k_expanded.shape[2])
         if dim_head <= 0 or dim_head > cfg.max_head_dim:
+            _update_stats(reason="head_dim_out_of_range")
+            if cfg.log_fallbacks:
+                logger.info("TurboQuant attention skip: dim_head=%d max_head_dim=%d", dim_head, int(cfg.max_head_dim))
+            _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
         if (query_tokens * key_tokens) < cfg.min_token_product:
+            _update_stats(reason="token_product_below_min")
+            if cfg.log_fallbacks:
+                logger.info(
+                    "TurboQuant attention skip: query_tokens=%d key_tokens=%d token_product=%d min_token_product=%d",
+                    query_tokens,
+                    key_tokens,
+                    int(query_tokens * key_tokens),
+                    int(cfg.min_token_product),
+                )
+            _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
         if not _scope_matches(cfg.attention_scope, query_tokens, key_tokens):
+            _update_stats(reason="scope_filtered")
+            if cfg.log_fallbacks:
+                logger.info(
+                    "TurboQuant attention skip: attention_scope=%s query_tokens=%d key_tokens=%d",
+                    str(cfg.attention_scope),
+                    query_tokens,
+                    key_tokens,
+                )
+            _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
         if not _layer_matches(cfg, transformer_options):
+            _update_stats(reason="layer_filtered")
+            if cfg.log_fallbacks:
+                logger.info(
+                    "TurboQuant attention skip: layer outside [%d, %d] block_index=%s",
+                    int(cfg.layer_start),
+                    int(cfg.layer_end),
+                    None if not isinstance(transformer_options, dict) else transformer_options.get("block_index"),
+                )
+            _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
 
         compute_dtype = torch.float32 if cfg.force_fp32 else q_expanded.dtype
@@ -279,9 +369,16 @@ def turboquant_attention_override(original_func: Callable[..., torch.Tensor], *a
         out_rot = torch.einsum("bhqk,bhkd->bhqd", probs, v_hat_rot)
         out = torch.matmul(out_rot, rotation.transpose(0, 1)) if cfg.quantize_values else out_rot
         out = out.to(dtype=v.dtype if v.dtype.is_floating_point else q.dtype)
+        _update_stats(applied=True)
+        _maybe_log_stats(cfg)
         return _restore_attention_layout(out, skip_output_reshape=skip_output_reshape)
     except Exception as exc:
-        logger.debug("TurboQuant attention fallback: %s", exc)
+        _update_stats(reason="exception")
+        if cfg.log_fallbacks:
+            logger.warning("TurboQuant attention fallback: %s", exc)
+        else:
+            logger.debug("TurboQuant attention fallback: %s", exc)
+        _maybe_log_stats(cfg)
         return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
 
 
@@ -345,6 +442,15 @@ class TurboQuantAttentionModelPatch:
                 "force_fp32": (["disable", "enable"], {
                     "tooltip": "Cast q/k/v to fp32 inside the override for extra numerical stability.",
                 }),
+                "log_every": ("INT", {
+                    "default": 50,
+                    "min": 0,
+                    "max": 1000000,
+                    "tooltip": "Emit a TurboQuant runtime summary every N attention calls. Set 1 for per-call summaries, 0 to disable periodic summaries.",
+                }),
+                "log_fallbacks": (["disable", "enable"], {
+                    "tooltip": "Log individual skip/fallback reasons when TurboQuant does not activate.",
+                }),
             }
         }
 
@@ -366,6 +472,8 @@ class TurboQuantAttentionModelPatch:
         rotation_seed,
         max_head_dim,
         force_fp32,
+        log_every,
+        log_fallbacks,
     ):
         patched = model.clone()
 
@@ -403,11 +511,13 @@ class TurboQuantAttentionModelPatch:
             "rotation_seed": int(rotation_seed),
             "max_head_dim": int(max_head_dim),
             "force_fp32": force_fp32 == "enable",
+            "log_every": int(log_every),
+            "log_fallbacks": log_fallbacks == "enable",
             _DELEGATE_OVERRIDE_KEY: delegate_override,
         }
         transformer_options["optimized_attention_override"] = turboquant_attention_override
         logger.info(
-            "TurboQuant attention patch applied: bits=%d qjl_dim=%d use_qjl=%s quantize_values=%s min_token_product=%d scope=%s layer_start=%d layer_end=%d seed=%d max_head_dim=%d force_fp32=%s",
+            "TurboQuant attention patch applied: bits=%d qjl_dim=%d use_qjl=%s quantize_values=%s min_token_product=%d scope=%s layer_start=%d layer_end=%d seed=%d max_head_dim=%d force_fp32=%s log_every=%d log_fallbacks=%s",
             int(bits),
             int(qjl_dim),
             str(use_qjl == "enable"),
@@ -419,6 +529,8 @@ class TurboQuantAttentionModelPatch:
             int(rotation_seed),
             int(max_head_dim),
             str(force_fp32 == "enable"),
+            int(log_every),
+            str(log_fallbacks == "enable"),
         )
         return (patched,)
 
