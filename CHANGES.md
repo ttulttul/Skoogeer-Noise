@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.22 - 2026-04-01
+- Added `Model (TurboQuant Attention)`, a second `MODEL` patch node that applies a TurboQuant-inspired attention override with random orthogonal rotation, scalar quantization, and optional QJL-style residual correction on logits.
+- Locked `Model (RotorQuant Attention)` back to `keep_components=3` because the lossy `1`/`2` component variants produced poor image quality in practice.
+- Added test coverage for the TurboQuant model patcher and updated RotorQuant tests for the exact-only behavior.
+
 ## 1.2.21 - 2026-04-01
 - Added `Model (RotorQuant Attention)`, a ComfyUI-style `MODEL` patch node that injects an experimental RotorQuant-inspired attention override through `transformer_options`.
 - The override uses deterministic 3D rotor blocks with optional per-triplet rank reduction (`keep_components=1..3`) and falls back cleanly to any previously installed attention override when its gating conditions are not met.

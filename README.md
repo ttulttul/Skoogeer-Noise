@@ -8,7 +8,7 @@ A ComfyUI custom node pack for latent/image/conditioning perturbations and diagn
 - Seeded Gaussian noise utilities for `LATENT`, `IMAGE`, and `CONDITIONING`.
 - Procedural / structured noise generators (Perlin, Simplex, Worley, reaction-diffusion, fBm, swirl).
 - Low/high frequency split helpers for `LATENT` and `CONDITIONING`.
-- Experimental model patching for RotorQuant-style compressed attention.
+- Experimental model patching for RotorQuant/TurboQuant-style attention approximations.
 - Latent diagnostics preview nodes.
 
 This pack was extracted from `ComfyUI-FlowMatching-Upscaler` and also includes the latent/image/conditioning noise + filtering nodes that were previously shipped in `ComfyUI-QwenRectifiedFlowInverter`.
@@ -173,6 +173,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Unpatchify Flux.2 Latent](#unpatchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Patchify Flux.2 Latent](#patchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Model (RotorQuant Attention)](#model-rotorquant-attention) | `model/patch` | `MODEL` |
+| [Model (TurboQuant Attention)](#model-turboquant-attention) | `model/patch` | `MODEL` |
 | [Conditioning (Add Noise)](#conditioning-add-noise) | `conditioning/noise` | `CONDITIONING` |
 | [Conditioning (Gaussian Blur)](#conditioning-gaussian-blur) | `conditioning/filter` | `CONDITIONING` |
 | [Conditioning (Frequency Split)](#conditioning-frequency-split) | `conditioning/filter` | `CONDITIONING` (low), `CONDITIONING` (high) |
@@ -1044,7 +1045,7 @@ Instead of patching ComfyUI core or replacing your sampler, you place this node 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `model` | `MODEL` | – | – | Source model to clone and patch. |
-| `keep_components` | `INT` | `2` | `1..3` | Rotates each head in 3D triplets and keeps this many coordinates per triplet. `3` is exact; `1` or `2` are approximate. |
+| `keep_components` | `INT` | `3` | `1..3` | Values below `3` are currently forced back to `3` because the lossy variants produce poor image quality. |
 | `min_token_product` | `INT` | `65536` | `0..1073741824` | Minimum `query_tokens * key_tokens` needed before the override activates. |
 | `attention_scope` | enum | `self` | `self/cross/both` | Which attention calls to patch. `self` is usually the best target for diffusion latent attention. |
 | `layer_start` | `INT` | `-1` | `-1..4096` | First transformer block index to patch. `-1` disables the lower bound. |
@@ -1055,10 +1056,42 @@ Instead of patching ComfyUI core or replacing your sampler, you place this node 
 
 ##### Notes
 
-- `keep_components = 3` preserves attention exactly and is mainly useful as a correctness baseline.
-- `keep_components = 2` or `1` trades fidelity for less q/k/v work inside the attention kernel.
+- RotorQuant lossy modes are currently disabled in this node because `keep_components < 3` produced poor image quality in practice.
 - This is an adaptation of RotorQuant's rotor-style blockwise orthogonal transform idea, not a direct port of its LLM KV-cache quantizer.
 - The node patches `transformer_options["optimized_attention_override"]`, so it composes naturally with normal ComfyUI sampler nodes.
+
+---
+
+#### Model (TurboQuant Attention)
+
+Clones a `MODEL` and installs an experimental attention override inspired by the original TurboQuant paper: random orthogonal rotation, coordinate-wise scalar quantization, and optional QJL-style residual correction on logits.
+Like the RotorQuant node, this is a ComfyUI attention patch rather than a literal KV-cache storage backend.
+
+- **Menu category:** `model/patch`
+- **Returns:** `MODEL`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `model` | `MODEL` | – | – | Source model to clone and patch. |
+| `bits` | `INT` | `4` | `1..8` | Bits per rotated coordinate for the scalar quantizer. |
+| `qjl_dim` | `INT` | `64` | `1..4096` | Projection width used by the QJL-style residual correction term. |
+| `use_qjl` | enum | `enable` | `enable/disable` | Enable the 1-bit residual correction stage for logits. |
+| `quantize_values` | enum | `enable` | `enable/disable` | Quantize values as well as keys. Disable to keep values in full precision while only approximating logits. |
+| `min_token_product` | `INT` | `65536` | `0..1073741824` | Minimum `query_tokens * key_tokens` needed before the override activates. |
+| `attention_scope` | enum | `self` | `self/cross/both` | Which attention calls to patch. |
+| `layer_start` | `INT` | `-1` | `-1..4096` | First transformer block index to patch. `-1` disables the lower bound. |
+| `layer_end` | `INT` | `-1` | `-1..4096` | Last transformer block index to patch. `-1` disables the upper bound. |
+| `rotation_seed` | `INT` | `0` | `0..2^64-1` | Seed used for the random orthogonal rotation and Gaussian residual projection. |
+| `max_head_dim` | `INT` | `256` | `1..4096` | Skip unusually large heads if the projection overhead would likely dominate. |
+| `force_fp32` | enum | `disable` | `disable/enable` | Optionally run the patched q/k/v path in fp32 for extra stability. |
+
+##### Notes
+
+- This node is the closer match to the original TurboQuant recipe than the RotorQuant node.
+- The implementation uses a deterministic random orthogonal rotation per head, scalar quantize/dequantize on rotated coordinates, and an optional QJL-style residual correction term on the logits path.
+- In ComfyUI this is still an attention override, not persistent KV-cache compression, so expect approximation tradeoffs rather than the exact runtime profile reported for LLM serving.
 
 ---
 

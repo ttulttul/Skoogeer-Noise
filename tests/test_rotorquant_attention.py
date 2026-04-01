@@ -209,7 +209,7 @@ def test_rotorquant_model_patch_clones_and_installs_override_without_mutating_so
     patched_transformer_options = patched.model_options["transformer_options"]
     assert patched_transformer_options["existing_key"] == "keep-me"
     assert patched_transformer_options["optimized_attention_override"] is rqa.rotorquant_attention_override
-    assert patched_transformer_options["rotorquant_attention"]["keep_components"] == 2
+    assert patched_transformer_options["rotorquant_attention"]["keep_components"] == 3
     assert patched_transformer_options["rotorquant_attention"]["min_token_product"] == 12345
     assert patched_transformer_options["rotorquant_attention"]["attention_scope"] == "self"
     assert patched_transformer_options["rotorquant_attention"]["layer_start"] == 3

@@ -54,6 +54,10 @@ if __package__:
         NODE_CLASS_MAPPINGS as ROTORQUANT_NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS as ROTORQUANT_DISPLAY_NAME_MAPPINGS,
     )
+    from .src.turboquant_attention import (  # type: ignore[attr-defined] # noqa: F401
+        NODE_CLASS_MAPPINGS as TURBOQUANT_NODE_CLASS_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS as TURBOQUANT_DISPLAY_NAME_MAPPINGS,
+    )
 else:  # pragma: no cover - direct execution fallback
     _ROOT_DIR = pathlib.Path(__file__).resolve().parent
     _load_module_from_path("masking", _ROOT_DIR / "src" / "masking.py")
@@ -72,6 +76,7 @@ else:  # pragma: no cover - direct execution fallback
     latent_to_image_module = _load_module_from_path("latent_to_image", _ROOT_DIR / "src" / "latent_to_image.py")
     qwen_noise_module = _load_module_from_path("qwen_noise_nodes", _ROOT_DIR / "src" / "qwen_noise_nodes.py")
     rotorquant_module = _load_module_from_path("rotorquant_attention", _ROOT_DIR / "src" / "rotorquant_attention.py")
+    turboquant_module = _load_module_from_path("turboquant_attention", _ROOT_DIR / "src" / "turboquant_attention.py")
 
     STATS_NODE_CLASS_MAPPINGS = getattr(stats_module, "NODE_CLASS_MAPPINGS")
     STATS_DISPLAY_NAME_MAPPINGS = getattr(stats_module, "NODE_DISPLAY_NAME_MAPPINGS")
@@ -91,6 +96,8 @@ else:  # pragma: no cover - direct execution fallback
     QWEN_NOISE_DISPLAY_NAME_MAPPINGS = getattr(qwen_noise_module, "NODE_DISPLAY_NAME_MAPPINGS")
     ROTORQUANT_NODE_CLASS_MAPPINGS = getattr(rotorquant_module, "NODE_CLASS_MAPPINGS")
     ROTORQUANT_DISPLAY_NAME_MAPPINGS = getattr(rotorquant_module, "NODE_DISPLAY_NAME_MAPPINGS")
+    TURBOQUANT_NODE_CLASS_MAPPINGS = getattr(turboquant_module, "NODE_CLASS_MAPPINGS")
+    TURBOQUANT_DISPLAY_NAME_MAPPINGS = getattr(turboquant_module, "NODE_DISPLAY_NAME_MAPPINGS")
 
 NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     **DRAG_NODE_CLASS_MAPPINGS,
@@ -101,6 +108,7 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     **LATENT_TO_IMAGE_NODE_CLASS_MAPPINGS,
     **QWEN_NOISE_NODE_CLASS_MAPPINGS,
     **ROTORQUANT_NODE_CLASS_MAPPINGS,
+    **TURBOQUANT_NODE_CLASS_MAPPINGS,
     **STATS_NODE_CLASS_MAPPINGS,
 }
 NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
@@ -112,6 +120,7 @@ NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     **LATENT_TO_IMAGE_DISPLAY_NAME_MAPPINGS,
     **QWEN_NOISE_DISPLAY_NAME_MAPPINGS,
     **ROTORQUANT_DISPLAY_NAME_MAPPINGS,
+    **TURBOQUANT_DISPLAY_NAME_MAPPINGS,
     **STATS_DISPLAY_NAME_MAPPINGS,
 }
 

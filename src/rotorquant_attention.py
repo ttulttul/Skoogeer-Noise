@@ -17,7 +17,7 @@ _SCOPE_OPTIONS = ("self", "cross", "both")
 @dataclass
 class RotorQuantAttentionConfig:
     enabled: bool = True
-    keep_components: int = 2
+    keep_components: int = 3
     min_token_product: int = 65536
     attention_scope: str = "self"
     layer_start: int = -1
@@ -46,9 +46,17 @@ def _resolve_config(config_dict: Optional[Dict[str, Any]]) -> RotorQuantAttentio
     if attention_scope not in _SCOPE_OPTIONS:
         attention_scope = "self"
 
+    requested_keep_components = int(config_dict.get("keep_components", 3))
+    keep_components = 3
+    if requested_keep_components != 3:
+        logger.warning(
+            "RotorQuant attention: requested keep_components=%d, but lossy modes are disabled because they produce poor image quality. Using keep_components=3.",
+            requested_keep_components,
+        )
+
     return RotorQuantAttentionConfig(
         enabled=bool(config_dict.get("enabled", True)),
-        keep_components=max(1, min(3, int(config_dict.get("keep_components", 2)))),
+        keep_components=keep_components,
         min_token_product=max(0, int(config_dict.get("min_token_product", 65536))),
         attention_scope=attention_scope,
         layer_start=int(config_dict.get("layer_start", -1)),
@@ -278,10 +286,10 @@ class RotorQuantAttentionModelPatch:
             "required": {
                 "model": ("MODEL", {"tooltip": "Model to clone and patch with RotorQuant-style attention."}),
                 "keep_components": ("INT", {
-                    "default": 2,
+                    "default": 3,
                     "min": 1,
                     "max": 3,
-                    "tooltip": "How many rotated coordinates to keep from each 3D rotor group. 3 is exact; 1-2 are approximate and potentially faster.",
+                    "tooltip": "How many rotated coordinates to keep from each 3D rotor group. Values below 3 are currently forced back to 3 because the lossy modes degrade image quality too much.",
                 }),
                 "min_token_product": ("INT", {
                     "default": 65536,
@@ -361,9 +369,16 @@ class RotorQuantAttentionModelPatch:
             if callable(previous_delegate) and previous_delegate is not rotorquant_attention_override:
                 delegate_override = previous_delegate
 
+        normalized_keep_components = 3
+        if int(keep_components) != 3:
+            logger.warning(
+                "RotorQuant attention patch requested keep_components=%d, but lossy modes are disabled because they produce poor image quality. Storing keep_components=3.",
+                int(keep_components),
+            )
+
         transformer_options["rotorquant_attention"] = {
             "enabled": True,
-            "keep_components": int(keep_components),
+            "keep_components": normalized_keep_components,
             "min_token_product": int(min_token_product),
             "attention_scope": str(attention_scope),
             "layer_start": int(layer_start),
@@ -376,7 +391,7 @@ class RotorQuantAttentionModelPatch:
         transformer_options["optimized_attention_override"] = rotorquant_attention_override
         logger.info(
             "RotorQuant attention patch applied: keep=%d min_token_product=%d scope=%s layer_start=%d layer_end=%d seed=%d max_head_dim=%d force_fp32=%s",
-            int(keep_components),
+            int(normalized_keep_components),
             int(min_token_product),
             str(attention_scope),
             int(layer_start),
