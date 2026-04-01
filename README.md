@@ -1098,6 +1098,7 @@ Like the RotorQuant node, this is a ComfyUI attention patch rather than a litera
 - QJL correction is currently disabled in the runtime path even if the input says `enable`; that stage reintroduced dense-memory pressure and OOMs on large diffusion layers.
 - The default settings are intentionally conservative. Aggressive settings like `bits <= 4` or `quantize_values = enable` can badly damage diffusion image quality and may still be slower than baseline sampling.
 - In ComfyUI this is still an attention override, not persistent KV-cache compression, so expect approximation tradeoffs rather than the exact runtime profile reported for LLM serving.
+- TurboQuant stats now reset automatically at the start of each new sampling run, so the periodic summaries reflect the current run instead of stale process-wide history.
 - For debugging, set `log_every = 1` to get immediate runtime summaries and `log_fallbacks = enable` to see why calls were skipped. The module also exposes `get_turboquant_stats()` / `reset_turboquant_stats()` for programmatic inspection.
 
 ---

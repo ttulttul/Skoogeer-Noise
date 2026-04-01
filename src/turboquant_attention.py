@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 _DELEGATE_OVERRIDE_KEY = "_delegate_override"
 _SCOPE_OPTIONS = ("self", "cross", "both")
 _NORMAL_DIST = torch.distributions.Normal(0.0, 1.0)
+_PRE_CFG_HOOK_KEY = "_turboquant_pre_cfg_hook"
+_RUNTIME_STATE_KEY = "_turboquant_runtime_state"
 
 
 @dataclass
@@ -59,6 +61,19 @@ def get_turboquant_stats() -> Dict[str, Any]:
     }
 
 
+def _sigma_scalar(value: Any) -> Optional[float]:
+    if isinstance(value, torch.Tensor):
+        if value.numel() <= 0:
+            return None
+        return float(value.detach().float().max().item())
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
 def _update_stats(*, applied: bool = False, reason: Optional[str] = None) -> None:
     _GLOBAL_STATS["calls"] += 1
     if applied:
@@ -81,6 +96,41 @@ def _maybe_log_stats(cfg: TurboQuantAttentionConfig) -> None:
         int(_GLOBAL_STATS["fallback_calls"]),
         dict(_GLOBAL_STATS["fallback_reasons"]),
     )
+
+
+def _make_sampler_pre_cfg_hook() -> Callable[[Dict[str, Any]], Any]:
+    def _pre_cfg(args: Dict[str, Any]) -> Any:
+        model_options = args.get("model_options", {})
+        if not isinstance(model_options, dict):
+            return args.get("conds_out")
+
+        state = model_options.get(_RUNTIME_STATE_KEY)
+        if not isinstance(state, dict):
+            state = {}
+            model_options[_RUNTIME_STATE_KEY] = state
+
+        sigma = _sigma_scalar(args.get("sigma", None))
+        last_sigma = state.get("last_sigma")
+        if sigma is not None and (last_sigma is None or sigma > (float(last_sigma) + 1e-6)):
+            reset_turboquant_stats()
+            state["run_index"] = int(state.get("run_index", 0)) + 1
+        state["last_sigma"] = sigma
+        return args.get("conds_out")
+
+    setattr(_pre_cfg, _PRE_CFG_HOOK_KEY, True)
+    return _pre_cfg
+
+
+def _ensure_sampler_pre_cfg_hook(model_options: Dict[str, Any]) -> None:
+    hooks = model_options.get("sampler_pre_cfg_function", [])
+    if not isinstance(hooks, list):
+        hooks = [hooks]
+    for hook in hooks:
+        if getattr(hook, _PRE_CFG_HOOK_KEY, False):
+            model_options["sampler_pre_cfg_function"] = hooks
+            return
+    hooks = hooks + [_make_sampler_pre_cfg_hook()]
+    model_options["sampler_pre_cfg_function"] = hooks
 
 
 def _delegate_or_original(
@@ -575,6 +625,7 @@ class TurboQuantAttentionModelPatch:
             _DELEGATE_OVERRIDE_KEY: delegate_override,
         }
         transformer_options["optimized_attention_override"] = turboquant_attention_override
+        _ensure_sampler_pre_cfg_hook(patched.model_options)
         logger.info(
             "TurboQuant attention patch applied: bits=%d qjl_dim=%d use_qjl=%s quantize_values=%s min_token_product=%d max_token_product=%d scope=%s layer_start=%d layer_end=%d seed=%d max_head_dim=%d force_fp32=%s memory_margin_mb=%d log_every=%d log_fallbacks=%s",
             int(bits),

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.26 - 2026-04-01
+- TurboQuant runtime stats now reset automatically at the start of each new sampling run via a sampler pre-CFG hook, so fallback summaries no longer accumulate stale counts across runs.
+- Added regression coverage for the per-run stats reset behavior.
+
 ## 1.2.25 - 2026-04-01
 - Changed `Model (TurboQuant Attention)` defaults to conservative values for diffusion use: `bits=8`, `quantize_values=disable`, `use_qjl=disable`, `max_token_product=262144`, and `memory_margin_mb=1024`.
 - Added an explicit warning log when users choose aggressive TurboQuant settings that are likely to hurt image quality or still be slower than baseline.

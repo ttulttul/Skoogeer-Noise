@@ -211,6 +211,32 @@ def test_turboquant_input_defaults_are_conservative():
     assert inputs["memory_margin_mb"][1]["default"] == 1024
 
 
+def test_turboquant_sampler_pre_cfg_hook_resets_stats_on_new_run():
+    tqa.reset_turboquant_stats()
+    model_options = {}
+    tqa._ensure_sampler_pre_cfg_hook(model_options)
+    hooks = model_options["sampler_pre_cfg_function"]
+    assert len(hooks) == 1
+
+    tqa._update_stats(applied=True)
+    assert tqa.get_turboquant_stats()["calls"] == 1
+
+    hooks[0]({"model_options": model_options, "sigma": torch.tensor([1.0]), "conds_out": [None, None]})
+    assert tqa.get_turboquant_stats()["calls"] == 0
+
+    tqa._update_stats(reason="scope_filtered")
+    assert tqa.get_turboquant_stats()["fallback_calls"] == 1
+
+    hooks[0]({"model_options": model_options, "sigma": torch.tensor([0.5]), "conds_out": [None, None]})
+    assert tqa.get_turboquant_stats()["fallback_calls"] == 1
+
+    hooks[0]({"model_options": model_options, "sigma": torch.tensor([1.2]), "conds_out": [None, None]})
+    stats = tqa.get_turboquant_stats()
+    assert stats["calls"] == 0
+    assert stats["fallback_calls"] == 0
+    assert model_options[tqa._RUNTIME_STATE_KEY]["run_index"] == 2
+
+
 def test_turboquant_attention_respects_min_token_product_gate():
     tqa.reset_turboquant_stats()
     q = torch.randn((1, 2, 4, 8), dtype=torch.float32)
