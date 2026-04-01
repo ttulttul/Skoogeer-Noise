@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.21 - 2026-04-01
+- Added `Model (RotorQuant Attention)`, a ComfyUI-style `MODEL` patch node that injects an experimental RotorQuant-inspired attention override through `transformer_options`.
+- The override uses deterministic 3D rotor blocks with optional per-triplet rank reduction (`keep_components=1..3`) and falls back cleanly to any previously installed attention override when its gating conditions are not met.
+- Added tests covering exact full-rank behavior, compressed-path shape preservation, delegate fallback, and non-mutating model clone patching.
+
 ## 1.2.19 - 2026-03-01
 - Fixed intermittent bypass-LoRA CPU/GPU mismatches by synchronizing adapter tensors to the active UNet input device at runtime in `KSampler (LoRA Sigma Inverse)`.
 - Added test coverage for adapter-device synchronization behavior.

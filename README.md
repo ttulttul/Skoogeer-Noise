@@ -8,6 +8,7 @@ A ComfyUI custom node pack for latent/image/conditioning perturbations and diagn
 - Seeded Gaussian noise utilities for `LATENT`, `IMAGE`, and `CONDITIONING`.
 - Procedural / structured noise generators (Perlin, Simplex, Worley, reaction-diffusion, fBm, swirl).
 - Low/high frequency split helpers for `LATENT` and `CONDITIONING`.
+- Experimental model patching for RotorQuant-style compressed attention.
 - Latent diagnostics preview nodes.
 
 This pack was extracted from `ComfyUI-FlowMatching-Upscaler` and also includes the latent/image/conditioning noise + filtering nodes that were previously shipped in `ComfyUI-QwenRectifiedFlowInverter`.
@@ -31,6 +32,7 @@ This pack was extracted from `ComfyUI-FlowMatching-Upscaler` and also includes t
   - [Frequency Filtering](#frequency-filtering)
   - [Procedural Noise](#procedural-noise)
   - [Flux Tools](#flux-tools)
+  - [Model Patches](#model-patches)
   - [Conditioning Tools](#conditioning-tools)
 - [Examples Gallery](#examples-gallery)
 - [Development](#development)
@@ -170,6 +172,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [KSampler (LoRA Sigma Inverse)](#ksampler-lora-sigma-inverse) | `sampling` | `LATENT` |
 | [Unpatchify Flux.2 Latent](#unpatchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Patchify Flux.2 Latent](#patchify-flux2-latent) | `Latent/Flux` | `LATENT` |
+| [Model (RotorQuant Attention)](#model-rotorquant-attention) | `model/patch` | `MODEL` |
 | [Conditioning (Add Noise)](#conditioning-add-noise) | `conditioning/noise` | `CONDITIONING` |
 | [Conditioning (Gaussian Blur)](#conditioning-gaussian-blur) | `conditioning/filter` | `CONDITIONING` |
 | [Conditioning (Frequency Split)](#conditioning-frequency-split) | `conditioning/filter` | `CONDITIONING` (low), `CONDITIONING` (high) |
@@ -1023,6 +1026,39 @@ Re-patchifies an unpatchified Flux.2 latent back to the standard 2x2 patch forma
 ##### Notes
 
 - Use this after latent noise nodes to restore the format expected by Flux.2 models and downstream nodes.
+
+---
+
+### Model Patches
+
+#### Model (RotorQuant Attention)
+
+Clones a `MODEL` and installs an experimental attention override that adapts the RotorQuant paper's cheap blockwise 3D rotations to ComfyUI attention.
+Instead of patching ComfyUI core or replacing your sampler, you place this node between your model loader and a normal `KSampler`.
+
+- **Menu category:** `model/patch`
+- **Returns:** `MODEL`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `model` | `MODEL` | – | – | Source model to clone and patch. |
+| `keep_components` | `INT` | `2` | `1..3` | Rotates each head in 3D triplets and keeps this many coordinates per triplet. `3` is exact; `1` or `2` are approximate. |
+| `min_token_product` | `INT` | `65536` | `0..1073741824` | Minimum `query_tokens * key_tokens` needed before the override activates. |
+| `attention_scope` | enum | `self` | `self/cross/both` | Which attention calls to patch. `self` is usually the best target for diffusion latent attention. |
+| `layer_start` | `INT` | `-1` | `-1..4096` | First transformer block index to patch. `-1` disables the lower bound. |
+| `layer_end` | `INT` | `-1` | `-1..4096` | Last transformer block index to patch. `-1` disables the upper bound. |
+| `rotation_seed` | `INT` | `0` | `0..2^64-1` | Seed used to generate the deterministic per-block rotor rotations. |
+| `max_head_dim` | `INT` | `256` | `3..4096` | Skip unusually large heads if the projection overhead would likely dominate. |
+| `force_fp32` | enum | `disable` | `disable/enable` | Optionally run the patched q/k/v path in fp32 for extra stability. |
+
+##### Notes
+
+- `keep_components = 3` preserves attention exactly and is mainly useful as a correctness baseline.
+- `keep_components = 2` or `1` trades fidelity for less q/k/v work inside the attention kernel.
+- This is an adaptation of RotorQuant's rotor-style blockwise orthogonal transform idea, not a direct port of its LLM KV-cache quantizer.
+- The node patches `transformer_options["optimized_attention_override"]`, so it composes naturally with normal ComfyUI sampler nodes.
 
 ---
 

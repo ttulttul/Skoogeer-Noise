@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - fallback for direct module loading
 
 try:
     import torchvision.transforms.functional as TF  # type: ignore[import-not-found]
-except ModuleNotFoundError:  # pragma: no cover - fallback for environments without torchvision
+except Exception:  # pragma: no cover - fallback for environments without usable torchvision
     TF = None
 
 try:

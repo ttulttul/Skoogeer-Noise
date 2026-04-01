@@ -11,3 +11,4 @@
 - Sigma-scheduled LoRA strength is more flexible when modeled as interpolation between explicit `min_lora_strength` and `max_lora_strength`, not just a fixed zero-to-max ramp.
 - Sigma-scheduled LoRA control is more practical with optional step-window gating (`min_lora_step`/`max_lora_step`), where `-1` cleanly means unbounded on that side.
 - In bypass LoRA mode, adapter tensors may need runtime device re-sync to match active UNet execution device and avoid intermittent CPU/GPU mismatch errors.
+- RotorQuant targets LLM KV-cache compression, so the practical ComfyUI adaptation is a model patch that injects a rotor-style attention override into `transformer_options`, not a custom sampler or a direct port of the KV quantizer.
