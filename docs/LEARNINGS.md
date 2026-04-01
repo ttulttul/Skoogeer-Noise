@@ -14,3 +14,4 @@
 - RotorQuant targets LLM KV-cache compression, so the practical ComfyUI adaptation is a model patch that injects a rotor-style attention override into `transformer_options`, not a custom sampler or a direct port of the KV quantizer.
 - For image diffusion, RotorQuant-style rank reduction (`keep_components < 3`) degrades quality badly enough that it is better treated as unsupported; the TurboQuant-style quantization path is the more appropriate place for lossy attention experiments.
 - Attention-patch experiments need explicit runtime instrumentation; without per-reason skip counters and periodic summaries, it is too easy to mistake silent gating/fallback for a working approximation.
+- For diffusion transformers, a TurboQuant patch must preserve the backend's memory-efficient attention kernel. A Python-side dense logits implementation is a non-starter because it destroys the very memory behavior ComfyUI's optimized attention is relying on.

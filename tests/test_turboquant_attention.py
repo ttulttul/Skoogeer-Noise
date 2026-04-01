@@ -56,13 +56,15 @@ def test_turboquant_attention_quantized_path_preserves_shape_and_finiteness():
             "enabled": True,
             "bits": 4,
             "qjl_dim": 8,
-            "use_qjl": True,
+            "use_qjl": False,
             "quantize_values": True,
             "min_token_product": 1,
+            "max_token_product": 0,
             "attention_scope": "both",
             "rotation_seed": 17,
             "max_head_dim": 256,
             "force_fp32": False,
+            "memory_margin_mb": 0,
         },
     }
 
@@ -101,13 +103,15 @@ def test_turboquant_attention_uses_delegate_override_when_gated_off():
             "enabled": True,
             "bits": 4,
             "qjl_dim": 8,
-            "use_qjl": True,
+            "use_qjl": False,
             "quantize_values": True,
             "min_token_product": 1,
+            "max_token_product": 0,
             "attention_scope": "cross",
             "rotation_seed": 0,
             "max_head_dim": 256,
             "force_fp32": False,
+            "memory_margin_mb": 0,
             tqa._DELEGATE_OVERRIDE_KEY: delegate_override,
         },
     }
@@ -160,12 +164,14 @@ def test_turboquant_model_patch_clones_and_installs_override_without_mutating_so
         use_qjl="enable",
         quantize_values="disable",
         min_token_product=12345,
+        max_token_product=54321,
         attention_scope="self",
         layer_start=2,
         layer_end=8,
         rotation_seed=77,
         max_head_dim=192,
         force_fp32="enable",
+        memory_margin_mb=256,
         log_every=7,
         log_fallbacks="enable",
     )
@@ -179,15 +185,17 @@ def test_turboquant_model_patch_clones_and_installs_override_without_mutating_so
     assert patched_transformer_options["optimized_attention_override"] is tqa.turboquant_attention_override
     assert patched_transformer_options["turboquant_attention"]["bits"] == 3
     assert patched_transformer_options["turboquant_attention"]["qjl_dim"] == 32
-    assert patched_transformer_options["turboquant_attention"]["use_qjl"] is True
+    assert patched_transformer_options["turboquant_attention"]["use_qjl"] is False
     assert patched_transformer_options["turboquant_attention"]["quantize_values"] is False
     assert patched_transformer_options["turboquant_attention"]["min_token_product"] == 12345
+    assert patched_transformer_options["turboquant_attention"]["max_token_product"] == 54321
     assert patched_transformer_options["turboquant_attention"]["attention_scope"] == "self"
     assert patched_transformer_options["turboquant_attention"]["layer_start"] == 2
     assert patched_transformer_options["turboquant_attention"]["layer_end"] == 8
     assert patched_transformer_options["turboquant_attention"]["rotation_seed"] == 77
     assert patched_transformer_options["turboquant_attention"]["max_head_dim"] == 192
     assert patched_transformer_options["turboquant_attention"]["force_fp32"] is True
+    assert patched_transformer_options["turboquant_attention"]["memory_margin_mb"] == 256
     assert patched_transformer_options["turboquant_attention"]["log_every"] == 7
     assert patched_transformer_options["turboquant_attention"]["log_fallbacks"] is True
     assert patched_transformer_options["turboquant_attention"][tqa._DELEGATE_OVERRIDE_KEY] is previous_override
@@ -205,13 +213,15 @@ def test_turboquant_attention_respects_min_token_product_gate():
             "enabled": True,
             "bits": 4,
             "qjl_dim": 8,
-            "use_qjl": True,
+            "use_qjl": False,
             "quantize_values": True,
             "min_token_product": 10_000,
+            "max_token_product": 0,
             "attention_scope": "both",
             "rotation_seed": 0,
             "max_head_dim": 256,
             "force_fp32": False,
+            "memory_margin_mb": 0,
         },
     }
 
@@ -232,3 +242,94 @@ def test_turboquant_attention_respects_min_token_product_gate():
     assert stats["applied_calls"] == 0
     assert stats["fallback_calls"] == 1
     assert stats["fallback_reasons"]["token_product_below_min"] == 1
+
+
+def test_turboquant_attention_respects_max_token_product_gate():
+    tqa.reset_turboquant_stats()
+    q = torch.randn((1, 2, 4, 8), dtype=torch.float32)
+    k = torch.randn((1, 2, 4, 8), dtype=torch.float32)
+    v = torch.randn((1, 2, 4, 8), dtype=torch.float32)
+    baseline = exact_attention(q, k, v, 2, skip_reshape=True, skip_output_reshape=True)
+
+    transformer_options = {
+        "turboquant_attention": {
+            "enabled": True,
+            "bits": 4,
+            "qjl_dim": 8,
+            "use_qjl": False,
+            "quantize_values": True,
+            "min_token_product": 1,
+            "max_token_product": 8,
+            "attention_scope": "both",
+            "rotation_seed": 0,
+            "max_head_dim": 256,
+            "force_fp32": False,
+            "memory_margin_mb": 0,
+        },
+    }
+
+    out = tqa.turboquant_attention_override(
+        exact_attention,
+        q,
+        k,
+        v,
+        2,
+        skip_reshape=True,
+        skip_output_reshape=True,
+        transformer_options=transformer_options,
+    )
+
+    assert torch.allclose(out, baseline, atol=1e-6, rtol=1e-6)
+    stats = tqa.get_turboquant_stats()
+    assert stats["calls"] == 1
+    assert stats["applied_calls"] == 0
+    assert stats["fallback_calls"] == 1
+    assert stats["fallback_reasons"]["token_product_above_max"] == 1
+
+
+def test_turboquant_attention_respects_memory_guard(monkeypatch):
+    tqa.reset_turboquant_stats()
+    q = torch.randn((1, 2, 9, 8), dtype=torch.float32)
+    k = torch.randn((1, 2, 9, 8), dtype=torch.float32)
+    v = torch.randn((1, 2, 9, 8), dtype=torch.float32)
+    baseline = exact_attention(q, k, v, 2, skip_reshape=True, skip_output_reshape=True)
+
+    def fake_budget_ok(device, estimated_bytes, margin_mb):
+        return False, 128 * 1024 * 1024
+
+    monkeypatch.setattr(tqa, "_workspace_budget_ok", fake_budget_ok)
+
+    transformer_options = {
+        "turboquant_attention": {
+            "enabled": True,
+            "bits": 4,
+            "qjl_dim": 8,
+            "use_qjl": False,
+            "quantize_values": True,
+            "min_token_product": 1,
+            "max_token_product": 0,
+            "attention_scope": "both",
+            "rotation_seed": 0,
+            "max_head_dim": 256,
+            "force_fp32": False,
+            "memory_margin_mb": 512,
+        },
+    }
+
+    out = tqa.turboquant_attention_override(
+        exact_attention,
+        q,
+        k,
+        v,
+        2,
+        skip_reshape=True,
+        skip_output_reshape=True,
+        transformer_options=transformer_options,
+    )
+
+    assert torch.allclose(out, baseline, atol=1e-6, rtol=1e-6)
+    stats = tqa.get_turboquant_stats()
+    assert stats["calls"] == 1
+    assert stats["applied_calls"] == 0
+    assert stats["fallback_calls"] == 1
+    assert stats["fallback_reasons"]["memory_guard"] == 1

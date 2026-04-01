@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.24 - 2026-04-01
+- Reworked `Model (TurboQuant Attention)` to preserve ComfyUI's original optimized attention kernel by passing transformed `q/k/v` back into `original_func(...)` instead of materializing dense logits in Python.
+- Added `max_token_product` and `memory_margin_mb` guards so oversized or memory-risky attention calls skip cleanly before OOM.
+- Temporarily disabled the QJL correction path at runtime because it reintroduced dense-memory blowups on large diffusion layers.
+
 ## 1.2.23 - 2026-04-01
 - Added TurboQuant runtime instrumentation with applied/fallback counters, per-reason skip tracking, periodic summary logging, and optional per-fallback logging.
 - Added `log_every` and `log_fallbacks` controls to `Model (TurboQuant Attention)` and test coverage for the new stats behavior.

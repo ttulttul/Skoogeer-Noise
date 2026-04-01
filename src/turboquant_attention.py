@@ -23,12 +23,14 @@ class TurboQuantAttentionConfig:
     use_qjl: bool = True
     quantize_values: bool = True
     min_token_product: int = 65536
+    max_token_product: int = 0
     attention_scope: str = "self"
     layer_start: int = -1
     layer_end: int = -1
     rotation_seed: int = 0
     max_head_dim: int = 256
     force_fp32: bool = False
+    memory_margin_mb: int = 512
     log_every: int = 50
     log_fallbacks: bool = False
 
@@ -107,12 +109,14 @@ def _resolve_config(config_dict: Optional[Dict[str, Any]]) -> TurboQuantAttentio
         use_qjl=bool(config_dict.get("use_qjl", True)),
         quantize_values=bool(config_dict.get("quantize_values", True)),
         min_token_product=max(0, int(config_dict.get("min_token_product", 65536))),
+        max_token_product=max(0, int(config_dict.get("max_token_product", 0))),
         attention_scope=attention_scope,
         layer_start=int(config_dict.get("layer_start", -1)),
         layer_end=int(config_dict.get("layer_end", -1)),
         rotation_seed=int(config_dict.get("rotation_seed", 0)),
         max_head_dim=max(1, int(config_dict.get("max_head_dim", 256))),
         force_fp32=bool(config_dict.get("force_fp32", False)),
+        memory_margin_mb=max(0, int(config_dict.get("memory_margin_mb", 512))),
         log_every=max(0, int(config_dict.get("log_every", 50))),
         log_fallbacks=bool(config_dict.get("log_fallbacks", False)),
     )
@@ -229,30 +233,33 @@ def _quantize_rotated_tensor(tensor: torch.Tensor, bits: int) -> tuple[torch.Ten
     return quantized.contiguous(), residual.contiguous()
 
 
-@lru_cache(maxsize=128)
-def _gaussian_projection_cpu(dim: int, proj_dim: int, seed: int) -> torch.Tensor:
-    generator = torch.Generator(device="cpu").manual_seed(int(seed) & 0xFFFFFFFFFFFFFFFF)
-    projection = torch.randn((dim, proj_dim), generator=generator, dtype=torch.float32)
-    projection = projection / math.sqrt(max(1, proj_dim))
-    return projection.contiguous()
+def _estimate_workspace_bytes(
+    q_shape: torch.Size,
+    k_shape: torch.Size,
+    v_shape: torch.Size,
+    dtype: torch.dtype,
+    *,
+    quantize_values: bool,
+) -> int:
+    bytes_per_element = torch.empty((), dtype=dtype).element_size()
+    q_numel = math.prod(q_shape)
+    k_numel = math.prod(k_shape)
+    v_numel = math.prod(v_shape)
+    total_elements = q_numel + (2 * k_numel)
+    if quantize_values:
+        total_elements += 2 * v_numel
+    return int(total_elements * bytes_per_element)
 
 
-def _apply_attention_mask(sim: torch.Tensor, mask: Optional[torch.Tensor], heads: int) -> torch.Tensor:
-    if mask is None:
-        return sim
-    if mask.dtype == torch.bool:
-        if mask.ndim == 2:
-            mask = mask[:, None, None, :]
-        elif mask.ndim == 3:
-            mask = mask[:, None, :, :]
-        max_neg_value = -torch.finfo(sim.dtype).max
-        return sim.masked_fill(~mask, max_neg_value)
-
-    if mask.ndim == 2:
-        mask = mask.reshape(1, 1, mask.shape[-2], mask.shape[-1])
-    elif mask.ndim == 3:
-        mask = mask[:, None, :, :]
-    return sim + mask.to(device=sim.device, dtype=sim.dtype)
+def _workspace_budget_ok(device: torch.device, estimated_bytes: int, margin_mb: int) -> tuple[bool, Optional[int]]:
+    if device.type != "cuda":
+        return True, None
+    try:
+        free_bytes, _ = torch.cuda.mem_get_info(device)
+    except Exception:
+        return True, None
+    budget = max(0, int(free_bytes) - (int(margin_mb) * 1024 * 1024))
+    return int(estimated_bytes) <= budget, int(free_bytes)
 
 
 def turboquant_attention_override(original_func: Callable[..., torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
@@ -287,21 +294,34 @@ def turboquant_attention_override(original_func: Callable[..., torch.Tensor], *a
 
         _, _, query_tokens, dim_head = q_expanded.shape
         key_tokens = int(k_expanded.shape[2])
+        token_product = int(query_tokens * key_tokens)
         if dim_head <= 0 or dim_head > cfg.max_head_dim:
             _update_stats(reason="head_dim_out_of_range")
             if cfg.log_fallbacks:
                 logger.info("TurboQuant attention skip: dim_head=%d max_head_dim=%d", dim_head, int(cfg.max_head_dim))
             _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
-        if (query_tokens * key_tokens) < cfg.min_token_product:
+        if token_product < cfg.min_token_product:
             _update_stats(reason="token_product_below_min")
             if cfg.log_fallbacks:
                 logger.info(
                     "TurboQuant attention skip: query_tokens=%d key_tokens=%d token_product=%d min_token_product=%d",
                     query_tokens,
                     key_tokens,
-                    int(query_tokens * key_tokens),
+                    token_product,
                     int(cfg.min_token_product),
+                )
+            _maybe_log_stats(cfg)
+            return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
+        if cfg.max_token_product > 0 and token_product > cfg.max_token_product:
+            _update_stats(reason="token_product_above_max")
+            if cfg.log_fallbacks:
+                logger.info(
+                    "TurboQuant attention skip: query_tokens=%d key_tokens=%d token_product=%d max_token_product=%d",
+                    query_tokens,
+                    key_tokens,
+                    token_product,
+                    int(cfg.max_token_product),
                 )
             _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
@@ -328,6 +348,34 @@ def turboquant_attention_override(original_func: Callable[..., torch.Tensor], *a
             _maybe_log_stats(cfg)
             return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
 
+        if cfg.use_qjl and cfg.log_fallbacks:
+            logger.info("TurboQuant attention note: QJL correction is temporarily disabled in the runtime path to avoid dense-memory blowups.")
+
+        target_dtype = torch.float32 if cfg.force_fp32 else q_expanded.dtype
+        estimated_workspace_bytes = _estimate_workspace_bytes(
+            q_expanded.shape,
+            k_expanded.shape,
+            v_expanded.shape,
+            target_dtype,
+            quantize_values=cfg.quantize_values,
+        )
+        workspace_ok, free_bytes = _workspace_budget_ok(
+            q_expanded.device,
+            estimated_workspace_bytes,
+            cfg.memory_margin_mb,
+        )
+        if not workspace_ok:
+            _update_stats(reason="memory_guard")
+            if cfg.log_fallbacks:
+                logger.info(
+                    "TurboQuant attention skip: memory_guard estimated_extra=%.2f MiB free=%.2f MiB margin=%.2f MiB",
+                    estimated_workspace_bytes / (1024.0 * 1024.0),
+                    0.0 if free_bytes is None else free_bytes / (1024.0 * 1024.0),
+                    int(cfg.memory_margin_mb),
+                )
+            _maybe_log_stats(cfg)
+            return _delegate_or_original(original_func, delegate_override, *args, **kwargs)
+
         compute_dtype = torch.float32 if cfg.force_fp32 else q_expanded.dtype
         q_work = q_expanded.to(dtype=compute_dtype)
         k_work = k_expanded.to(dtype=compute_dtype)
@@ -341,39 +389,28 @@ def turboquant_attention_override(original_func: Callable[..., torch.Tensor], *a
         k_rot = torch.matmul(k_work, rotation)
         v_rot = torch.matmul(v_work, rotation) if cfg.quantize_values else v_work
 
-        k_hat_rot, k_residual = _quantize_rotated_tensor(k_rot, bits=cfg.bits)
+        k_hat_rot, _ = _quantize_rotated_tensor(k_rot, bits=cfg.bits)
         if cfg.quantize_values:
             v_hat_rot, _ = _quantize_rotated_tensor(v_rot, bits=cfg.bits)
         else:
             v_hat_rot = v_rot
 
-        scale = dim_head ** -0.5
-        sim = torch.einsum("bhqd,bhkd->bhqk", q_rot.float(), k_hat_rot.float()) * scale
-
-        if cfg.use_qjl and cfg.qjl_dim > 0:
-            proj_dim = min(int(cfg.qjl_dim), dim_head)
-            projection = _gaussian_projection_cpu(dim_head, proj_dim, _effective_rotation_seed(cfg, transformer_options) + 1).to(
-                device=q_work.device,
-                dtype=torch.float32,
-            )
-            q_proj = torch.matmul(q_rot.float(), projection)
-            residual_proj = torch.matmul(k_residual.float(), projection).sign()
-            residual_norm = k_residual.float().norm(dim=-1)
-            correction = torch.einsum("bhqm,bhkm->bhqk", q_proj, residual_proj)
-            correction = correction * (math.sqrt(math.pi / 2.0) / float(proj_dim))
-            correction = correction * residual_norm[:, :, None, :]
-            sim = sim + (correction * scale)
-
-        sim = _apply_attention_mask(sim, mask=mask, heads=heads)
-        probs = sim.softmax(dim=-1).to(dtype=v_hat_rot.dtype)
-        out_rot = torch.einsum("bhqk,bhkd->bhqd", probs, v_hat_rot)
-        out = torch.matmul(out_rot, rotation.transpose(0, 1)) if cfg.quantize_values else out_rot
-        out = out.to(dtype=v.dtype if v.dtype.is_floating_point else q.dtype)
         _update_stats(applied=True)
         _maybe_log_stats(cfg)
-        return _restore_attention_layout(out, skip_output_reshape=skip_output_reshape)
+        return original_func(
+            q_rot,
+            k_hat_rot,
+            v_hat_rot,
+            heads,
+            mask=mask,
+            attn_precision=kwargs.get("attn_precision"),
+            skip_reshape=True,
+            skip_output_reshape=skip_output_reshape,
+            transformer_options=transformer_options,
+        )
     except Exception as exc:
-        _update_stats(reason="exception")
+        reason = "oom" if "out of memory" in str(exc).lower() else "exception"
+        _update_stats(reason=reason)
         if cfg.log_fallbacks:
             logger.warning("TurboQuant attention fallback: %s", exc)
         else:
@@ -412,6 +449,12 @@ class TurboQuantAttentionModelPatch:
                     "max": 1073741824,
                     "tooltip": "Only patch attention calls where query_tokens * key_tokens meets this threshold.",
                 }),
+                "max_token_product": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 1073741824,
+                    "tooltip": "Skip attention calls above this query_tokens * key_tokens threshold. 0 disables the upper bound.",
+                }),
                 "attention_scope": (_SCOPE_OPTIONS, {
                     "tooltip": "Which attention calls to patch.",
                 }),
@@ -442,6 +485,12 @@ class TurboQuantAttentionModelPatch:
                 "force_fp32": (["disable", "enable"], {
                     "tooltip": "Cast q/k/v to fp32 inside the override for extra numerical stability.",
                 }),
+                "memory_margin_mb": ("INT", {
+                    "default": 512,
+                    "min": 0,
+                    "max": 65536,
+                    "tooltip": "Keep this much free CUDA memory in reserve before allowing the TurboQuant workspace allocation.",
+                }),
                 "log_every": ("INT", {
                     "default": 50,
                     "min": 0,
@@ -466,12 +515,14 @@ class TurboQuantAttentionModelPatch:
         use_qjl,
         quantize_values,
         min_token_product,
+        max_token_product,
         attention_scope,
         layer_start,
         layer_end,
         rotation_seed,
         max_head_dim,
         force_fp32,
+        memory_margin_mb,
         log_every,
         log_fallbacks,
     ):
@@ -498,37 +549,47 @@ class TurboQuantAttentionModelPatch:
             if callable(previous_delegate) and previous_delegate is not turboquant_attention_override:
                 delegate_override = previous_delegate
 
+        normalized_use_qjl = False
+        if use_qjl == "enable":
+            logger.warning(
+                "TurboQuant attention patch requested use_qjl=enable, but QJL correction is temporarily disabled in the runtime path to avoid dense-memory blowups."
+            )
+
         transformer_options["turboquant_attention"] = {
             "enabled": True,
             "bits": int(bits),
             "qjl_dim": int(qjl_dim),
-            "use_qjl": use_qjl == "enable",
+            "use_qjl": normalized_use_qjl,
             "quantize_values": quantize_values == "enable",
             "min_token_product": int(min_token_product),
+            "max_token_product": int(max_token_product),
             "attention_scope": str(attention_scope),
             "layer_start": int(layer_start),
             "layer_end": int(layer_end),
             "rotation_seed": int(rotation_seed),
             "max_head_dim": int(max_head_dim),
             "force_fp32": force_fp32 == "enable",
+            "memory_margin_mb": int(memory_margin_mb),
             "log_every": int(log_every),
             "log_fallbacks": log_fallbacks == "enable",
             _DELEGATE_OVERRIDE_KEY: delegate_override,
         }
         transformer_options["optimized_attention_override"] = turboquant_attention_override
         logger.info(
-            "TurboQuant attention patch applied: bits=%d qjl_dim=%d use_qjl=%s quantize_values=%s min_token_product=%d scope=%s layer_start=%d layer_end=%d seed=%d max_head_dim=%d force_fp32=%s log_every=%d log_fallbacks=%s",
+            "TurboQuant attention patch applied: bits=%d qjl_dim=%d use_qjl=%s quantize_values=%s min_token_product=%d max_token_product=%d scope=%s layer_start=%d layer_end=%d seed=%d max_head_dim=%d force_fp32=%s memory_margin_mb=%d log_every=%d log_fallbacks=%s",
             int(bits),
             int(qjl_dim),
-            str(use_qjl == "enable"),
+            str(normalized_use_qjl),
             str(quantize_values == "enable"),
             int(min_token_product),
+            int(max_token_product),
             str(attention_scope),
             int(layer_start),
             int(layer_end),
             int(rotation_seed),
             int(max_head_dim),
             str(force_fp32 == "enable"),
+            int(memory_margin_mb),
             int(log_every),
             str(log_fallbacks == "enable"),
         )

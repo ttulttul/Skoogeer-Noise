@@ -1064,7 +1064,7 @@ Instead of patching ComfyUI core or replacing your sampler, you place this node 
 
 #### Model (TurboQuant Attention)
 
-Clones a `MODEL` and installs an experimental attention override inspired by the original TurboQuant paper: random orthogonal rotation, coordinate-wise scalar quantization, and optional QJL-style residual correction on logits.
+Clones a `MODEL` and installs an experimental attention override inspired by the original TurboQuant paper: random orthogonal rotation plus coordinate-wise scalar quantization.
 Like the RotorQuant node, this is a ComfyUI attention patch rather than a literal KV-cache storage backend.
 
 - **Menu category:** `model/patch`
@@ -1080,19 +1080,22 @@ Like the RotorQuant node, this is a ComfyUI attention patch rather than a litera
 | `use_qjl` | enum | `enable` | `enable/disable` | Enable the 1-bit residual correction stage for logits. |
 | `quantize_values` | enum | `enable` | `enable/disable` | Quantize values as well as keys. Disable to keep values in full precision while only approximating logits. |
 | `min_token_product` | `INT` | `65536` | `0..1073741824` | Minimum `query_tokens * key_tokens` needed before the override activates. |
+| `max_token_product` | `INT` | `0` | `0..1073741824` | Skip attention calls above this `query_tokens * key_tokens` threshold. `0` disables the upper bound. |
 | `attention_scope` | enum | `self` | `self/cross/both` | Which attention calls to patch. |
 | `layer_start` | `INT` | `-1` | `-1..4096` | First transformer block index to patch. `-1` disables the lower bound. |
 | `layer_end` | `INT` | `-1` | `-1..4096` | Last transformer block index to patch. `-1` disables the upper bound. |
 | `rotation_seed` | `INT` | `0` | `0..2^64-1` | Seed used for the random orthogonal rotation and Gaussian residual projection. |
 | `max_head_dim` | `INT` | `256` | `1..4096` | Skip unusually large heads if the projection overhead would likely dominate. |
 | `force_fp32` | enum | `disable` | `disable/enable` | Optionally run the patched q/k/v path in fp32 for extra stability. |
+| `memory_margin_mb` | `INT` | `512` | `0..65536` | Keep this much free CUDA memory in reserve before allowing the TurboQuant workspace allocation. |
 | `log_every` | `INT` | `50` | `0..1000000` | Emit a TurboQuant runtime summary every N attention calls. `1` gives per-call summaries; `0` disables periodic summaries. |
 | `log_fallbacks` | enum | `disable` | `enable/disable` | Log individual skip and exception fallback reasons when TurboQuant does not activate. |
 
 ##### Notes
 
 - This node is the closer match to the original TurboQuant recipe than the RotorQuant node.
-- The implementation uses a deterministic random orthogonal rotation per head, scalar quantize/dequantize on rotated coordinates, and an optional QJL-style residual correction term on the logits path.
+- The runtime path rotates `q/k/v`, quantizes `k` and optionally `v`, then passes those transformed tensors back into ComfyUI's original optimized attention implementation. That avoids the dense-logit memory blowup of the earlier prototype.
+- QJL correction is currently disabled in the runtime path even if the input says `enable`; that stage reintroduced dense-memory pressure and OOMs on large diffusion layers.
 - In ComfyUI this is still an attention override, not persistent KV-cache compression, so expect approximation tradeoffs rather than the exact runtime profile reported for LLM serving.
 - For debugging, set `log_every = 1` to get immediate runtime summaries and `log_fallbacks = enable` to see why calls were skipped. The module also exposes `get_turboquant_stats()` / `reset_turboquant_stats()` for programmatic inspection.
 
