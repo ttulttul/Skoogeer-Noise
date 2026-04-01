@@ -18,19 +18,19 @@ _NORMAL_DIST = torch.distributions.Normal(0.0, 1.0)
 @dataclass
 class TurboQuantAttentionConfig:
     enabled: bool = True
-    bits: int = 4
+    bits: int = 8
     qjl_dim: int = 64
     use_qjl: bool = True
-    quantize_values: bool = True
+    quantize_values: bool = False
     min_token_product: int = 65536
-    max_token_product: int = 0
+    max_token_product: int = 262144
     attention_scope: str = "self"
     layer_start: int = -1
     layer_end: int = -1
     rotation_seed: int = 0
     max_head_dim: int = 256
     force_fp32: bool = False
-    memory_margin_mb: int = 512
+    memory_margin_mb: int = 1024
     log_every: int = 50
     log_fallbacks: bool = False
 
@@ -104,19 +104,19 @@ def _resolve_config(config_dict: Optional[Dict[str, Any]]) -> TurboQuantAttentio
 
     return TurboQuantAttentionConfig(
         enabled=bool(config_dict.get("enabled", True)),
-        bits=max(1, min(8, int(config_dict.get("bits", 4)))),
+        bits=max(1, min(8, int(config_dict.get("bits", 8)))),
         qjl_dim=max(1, int(config_dict.get("qjl_dim", 64))),
         use_qjl=bool(config_dict.get("use_qjl", True)),
-        quantize_values=bool(config_dict.get("quantize_values", True)),
+        quantize_values=bool(config_dict.get("quantize_values", False)),
         min_token_product=max(0, int(config_dict.get("min_token_product", 65536))),
-        max_token_product=max(0, int(config_dict.get("max_token_product", 0))),
+        max_token_product=max(0, int(config_dict.get("max_token_product", 262144))),
         attention_scope=attention_scope,
         layer_start=int(config_dict.get("layer_start", -1)),
         layer_end=int(config_dict.get("layer_end", -1)),
         rotation_seed=int(config_dict.get("rotation_seed", 0)),
         max_head_dim=max(1, int(config_dict.get("max_head_dim", 256))),
         force_fp32=bool(config_dict.get("force_fp32", False)),
-        memory_margin_mb=max(0, int(config_dict.get("memory_margin_mb", 512))),
+        memory_margin_mb=max(0, int(config_dict.get("memory_margin_mb", 1024))),
         log_every=max(0, int(config_dict.get("log_every", 50))),
         log_fallbacks=bool(config_dict.get("log_fallbacks", False)),
     )
@@ -426,10 +426,10 @@ class TurboQuantAttentionModelPatch:
             "required": {
                 "model": ("MODEL", {"tooltip": "Model to clone and patch with a TurboQuant-inspired attention approximation."}),
                 "bits": ("INT", {
-                    "default": 4,
+                    "default": 8,
                     "min": 1,
                     "max": 8,
-                    "tooltip": "Bits per rotated coordinate for the scalar quantizer.",
+                    "tooltip": "Bits per rotated coordinate for the scalar quantizer. Higher is safer for image quality; lower is more aggressive.",
                 }),
                 "qjl_dim": ("INT", {
                     "default": 64,
@@ -437,11 +437,11 @@ class TurboQuantAttentionModelPatch:
                     "max": 4096,
                     "tooltip": "Projection width for the QJL-style residual correction on logits.",
                 }),
-                "use_qjl": (["enable", "disable"], {
-                    "tooltip": "Enable the 1-bit residual correction term for key logits, following the TurboQuant paper's second stage.",
+                "use_qjl": (["disable", "enable"], {
+                    "tooltip": "Enable the 1-bit residual correction term for key logits. Currently forced off in the runtime path.",
                 }),
-                "quantize_values": (["enable", "disable"], {
-                    "tooltip": "Quantize values as well as keys. Disable to keep values in full precision while only approximating logits.",
+                "quantize_values": (["disable", "enable"], {
+                    "tooltip": "Quantize values as well as keys. Disable is safer for image quality and is the default.",
                 }),
                 "min_token_product": ("INT", {
                     "default": 65536,
@@ -450,10 +450,10 @@ class TurboQuantAttentionModelPatch:
                     "tooltip": "Only patch attention calls where query_tokens * key_tokens meets this threshold.",
                 }),
                 "max_token_product": ("INT", {
-                    "default": 0,
+                    "default": 262144,
                     "min": 0,
                     "max": 1073741824,
-                    "tooltip": "Skip attention calls above this query_tokens * key_tokens threshold. 0 disables the upper bound.",
+                    "tooltip": "Skip attention calls above this query_tokens * key_tokens threshold. Conservative default avoids the largest, most memory-sensitive layers.",
                 }),
                 "attention_scope": (_SCOPE_OPTIONS, {
                     "tooltip": "Which attention calls to patch.",
@@ -486,7 +486,7 @@ class TurboQuantAttentionModelPatch:
                     "tooltip": "Cast q/k/v to fp32 inside the override for extra numerical stability.",
                 }),
                 "memory_margin_mb": ("INT", {
-                    "default": 512,
+                    "default": 1024,
                     "min": 0,
                     "max": 65536,
                     "tooltip": "Keep this much free CUDA memory in reserve before allowing the TurboQuant workspace allocation.",
@@ -593,6 +593,12 @@ class TurboQuantAttentionModelPatch:
             int(log_every),
             str(log_fallbacks == "enable"),
         )
+        if int(bits) <= 4 or quantize_values == "enable":
+            logger.warning(
+                "TurboQuant attention patch warning: aggressive settings (bits=%d quantize_values=%s) can significantly degrade diffusion image quality and may still be slower than baseline.",
+                int(bits),
+                str(quantize_values),
+            )
         return (patched,)
 
 

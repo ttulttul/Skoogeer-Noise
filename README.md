@@ -1075,19 +1075,19 @@ Like the RotorQuant node, this is a ComfyUI attention patch rather than a litera
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `model` | `MODEL` | – | – | Source model to clone and patch. |
-| `bits` | `INT` | `4` | `1..8` | Bits per rotated coordinate for the scalar quantizer. |
+| `bits` | `INT` | `8` | `1..8` | Bits per rotated coordinate for the scalar quantizer. Higher is safer for image quality; lower is more aggressive. |
 | `qjl_dim` | `INT` | `64` | `1..4096` | Projection width used by the QJL-style residual correction term. |
-| `use_qjl` | enum | `enable` | `enable/disable` | Enable the 1-bit residual correction stage for logits. |
-| `quantize_values` | enum | `enable` | `enable/disable` | Quantize values as well as keys. Disable to keep values in full precision while only approximating logits. |
+| `use_qjl` | enum | `disable` | `disable/enable` | Enable the 1-bit residual correction stage for logits. Currently forced off in the runtime path. |
+| `quantize_values` | enum | `disable` | `disable/enable` | Quantize values as well as keys. Disable is safer for image quality and is the default. |
 | `min_token_product` | `INT` | `65536` | `0..1073741824` | Minimum `query_tokens * key_tokens` needed before the override activates. |
-| `max_token_product` | `INT` | `0` | `0..1073741824` | Skip attention calls above this `query_tokens * key_tokens` threshold. `0` disables the upper bound. |
+| `max_token_product` | `INT` | `262144` | `0..1073741824` | Skip attention calls above this `query_tokens * key_tokens` threshold. Conservative default avoids the largest, most memory-sensitive layers. |
 | `attention_scope` | enum | `self` | `self/cross/both` | Which attention calls to patch. |
 | `layer_start` | `INT` | `-1` | `-1..4096` | First transformer block index to patch. `-1` disables the lower bound. |
 | `layer_end` | `INT` | `-1` | `-1..4096` | Last transformer block index to patch. `-1` disables the upper bound. |
 | `rotation_seed` | `INT` | `0` | `0..2^64-1` | Seed used for the random orthogonal rotation and Gaussian residual projection. |
 | `max_head_dim` | `INT` | `256` | `1..4096` | Skip unusually large heads if the projection overhead would likely dominate. |
 | `force_fp32` | enum | `disable` | `disable/enable` | Optionally run the patched q/k/v path in fp32 for extra stability. |
-| `memory_margin_mb` | `INT` | `512` | `0..65536` | Keep this much free CUDA memory in reserve before allowing the TurboQuant workspace allocation. |
+| `memory_margin_mb` | `INT` | `1024` | `0..65536` | Keep this much free CUDA memory in reserve before allowing the TurboQuant workspace allocation. |
 | `log_every` | `INT` | `50` | `0..1000000` | Emit a TurboQuant runtime summary every N attention calls. `1` gives per-call summaries; `0` disables periodic summaries. |
 | `log_fallbacks` | enum | `disable` | `enable/disable` | Log individual skip and exception fallback reasons when TurboQuant does not activate. |
 
@@ -1096,6 +1096,7 @@ Like the RotorQuant node, this is a ComfyUI attention patch rather than a litera
 - This node is the closer match to the original TurboQuant recipe than the RotorQuant node.
 - The runtime path rotates `q/k/v`, quantizes `k` and optionally `v`, then passes those transformed tensors back into ComfyUI's original optimized attention implementation. That avoids the dense-logit memory blowup of the earlier prototype.
 - QJL correction is currently disabled in the runtime path even if the input says `enable`; that stage reintroduced dense-memory pressure and OOMs on large diffusion layers.
+- The default settings are intentionally conservative. Aggressive settings like `bits <= 4` or `quantize_values = enable` can badly damage diffusion image quality and may still be slower than baseline sampling.
 - In ComfyUI this is still an attention override, not persistent KV-cache compression, so expect approximation tradeoffs rather than the exact runtime profile reported for LLM serving.
 - For debugging, set `log_every = 1` to get immediate runtime summaries and `log_fallbacks = enable` to see why calls were skipped. The module also exposes `get_turboquant_stats()` / `reset_turboquant_stats()` for programmatic inspection.
 

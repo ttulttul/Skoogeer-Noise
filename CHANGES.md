@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.25 - 2026-04-01
+- Changed `Model (TurboQuant Attention)` defaults to conservative values for diffusion use: `bits=8`, `quantize_values=disable`, `use_qjl=disable`, `max_token_product=262144`, and `memory_margin_mb=1024`.
+- Added an explicit warning log when users choose aggressive TurboQuant settings that are likely to hurt image quality or still be slower than baseline.
+
 ## 1.2.24 - 2026-04-01
 - Reworked `Model (TurboQuant Attention)` to preserve ComfyUI's original optimized attention kernel by passing transformed `q/k/v` back into `original_func(...)` instead of materializing dense logits in Python.
 - Added `max_token_product` and `memory_margin_mb` guards so oversized or memory-risky attention calls skip cleanly before OOM.

@@ -201,6 +201,16 @@ def test_turboquant_model_patch_clones_and_installs_override_without_mutating_so
     assert patched_transformer_options["turboquant_attention"][tqa._DELEGATE_OVERRIDE_KEY] is previous_override
 
 
+def test_turboquant_input_defaults_are_conservative():
+    inputs = tqa.TurboQuantAttentionModelPatch.INPUT_TYPES()["required"]
+
+    assert inputs["bits"][1]["default"] == 8
+    assert inputs["use_qjl"][0][0] == "disable"
+    assert inputs["quantize_values"][0][0] == "disable"
+    assert inputs["max_token_product"][1]["default"] == 262144
+    assert inputs["memory_margin_mb"][1]["default"] == 1024
+
+
 def test_turboquant_attention_respects_min_token_product_gate():
     tqa.reset_turboquant_stats()
     q = torch.randn((1, 2, 4, 8), dtype=torch.float32)
