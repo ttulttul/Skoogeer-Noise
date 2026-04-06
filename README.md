@@ -42,7 +42,7 @@ This pack was extracted from `ComfyUI-FlowMatching-Upscaler` and also includes t
 1. Clone into `ComfyUI/custom_nodes/Skoogeer-Noise`
 2. Restart ComfyUI
 
-Dependencies: `torch`, `numpy`, and `einops` (ComfyUI typically already includes torch/numpy).
+Dependencies: `torch`, `numpy>=1.26`, and `einops` (ComfyUI typically already includes torch/numpy).
 
 ## Quick Start
 
