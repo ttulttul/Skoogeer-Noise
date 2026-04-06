@@ -5,7 +5,7 @@ A ComfyUI custom node pack for latent/image/conditioning perturbations and diagn
 ## Overview
 
 - Spatial perturbations (mesh drag warps) for `LATENT` and `IMAGE`.
-- Seeded Gaussian noise utilities for `LATENT`, `IMAGE`, and `CONDITIONING`.
+- Seeded Gaussian noise utilities for `LATENT`, `IMAGE`, and `CONDITIONING`, plus seed fan-out helpers.
 - Procedural / structured noise generators (Perlin, Simplex, Worley, reaction-diffusion, fBm, swirl).
 - Low/high frequency split helpers for `LATENT` and `CONDITIONING`.
 - Experimental model patching for RotorQuant/TurboQuant-style attention approximations.
@@ -144,6 +144,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Image Smoke Simulation](#image-smoke-simulation) | `image/perturb` | `IMAGE`, `IMAGE`, `IMAGE` |
 | [Latent Noise](#latent-noise) | `latent/perturb` | `LATENT` |
 | [Image Noise](#image-noise) | `image/perturb` | `IMAGE` |
+| [Next Seeds](#next-seeds) | `utils/seed` | `INT`, `INT`, `INT`, `INT` |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
 | [Image Batch to Latent](#image-batch-to-latent) | `latent/debug` | `LATENT` |
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
@@ -330,6 +331,21 @@ Adds **seeded Gaussian noise** to a ComfyUI `IMAGE` tensor.
 | `image` | `IMAGE` | – | – | Image to receive additional Gaussian noise. |
 | `seed` | `INT` | `0` | `0..2^64-1` | See Common Parameters. |
 | `strength` | `FLOAT` | `1.0` | `0.0..10.0` | See Common Parameters. |
+
+---
+
+#### Next Seeds
+
+Expands one 64-bit seed into four deterministic 64-bit seed outputs using a MurmurHash-style 64-bit mixer over four offset streams.
+
+- **Menu category:** `utils/seed`
+- **Returns:** `INT`, `INT`, `INT`, `INT`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `seed` | `INT` | `0` | `0..2^64-1` | Base seed to fan out into `seed_1` through `seed_4`. |
 
 ---
 

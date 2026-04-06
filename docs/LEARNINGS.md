@@ -17,3 +17,4 @@
 - For diffusion transformers, a TurboQuant patch must preserve the backend's memory-efficient attention kernel. A Python-side dense logits implementation is a non-starter because it destroys the very memory behavior ComfyUI's optimized attention is relying on.
 - Diffusion-friendly defaults for TurboQuant have to be conservative: leave values unquantized, keep bit-width high, and cap token-product coverage. Otherwise quality collapses before any speed benefit appears.
 - Runtime diagnostics must be scoped per sampling run, not per process lifetime. Otherwise fallback counters become misleading as soon as users iterate on node settings in a live ComfyUI session.
+- A robust seed fan-out node should not feed raw `0` directly through the MurmurHash3 64-bit finalizer, because `0` stays `0`; offsetting independent 64-bit streams before mixing avoids the all-zero trap while keeping deterministic seed derivation.

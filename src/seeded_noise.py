@@ -13,6 +13,30 @@ except ImportError:  # pragma: no cover - fallback for direct module loading
 logger = logging.getLogger(__name__)
 
 _SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
+_SEED_STREAM_INCREMENT = 0x9E3779B97F4A7C15
+
+
+def generate_seed(x: int) -> int:
+    seed = int(x) & _SEED_MASK_64
+    seed = (seed ^ (seed >> 33)) & _SEED_MASK_64
+    seed = (seed * 0xFF51AFD7ED558CCD) & _SEED_MASK_64
+    seed = (seed ^ (seed >> 33)) & _SEED_MASK_64
+    seed = (seed * 0xC4CEB9FE1A85EC53) & _SEED_MASK_64
+    seed = (seed ^ (seed >> 33)) & _SEED_MASK_64
+    return seed
+
+
+def next_seed_values(seed: int, *, count: int = 4) -> tuple[int, ...]:
+    if count <= 0:
+        raise ValueError(f"count must be positive, got {count}.")
+
+    base_seed = int(seed) & _SEED_MASK_64
+    derived = tuple(
+        generate_seed((base_seed + (index * _SEED_STREAM_INCREMENT)) & _SEED_MASK_64)
+        for index in range(1, count + 1)
+    )
+    logger.debug("Generated %d derived seeds from base_seed=%d: %s", count, base_seed, derived)
+    return derived
 
 
 def _seeded_gaussian_noise_like(tensor: torch.Tensor, *, seed: int) -> torch.Tensor:
@@ -230,12 +254,39 @@ class ImageNoise:
         return (noised,)
 
 
+class NextSeeds:
+    CATEGORY = "utils/seed"
+    RETURN_TYPES = ("INT", "INT", "INT", "INT")
+    RETURN_NAMES = ("seed_1", "seed_2", "seed_3", "seed_4")
+    FUNCTION = "next_seeds"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": _SEED_MASK_64,
+                    "tooltip": "Base 64-bit seed to expand into four deterministic derived seeds.",
+                }),
+            },
+        }
+
+    def next_seeds(self, seed: int):
+        derived = next_seed_values(seed, count=4)
+        logger.debug("NextSeeds node expanded seed=%d into %s", int(seed) & _SEED_MASK_64, derived)
+        return derived
+
+
 NODE_CLASS_MAPPINGS = {
     "LatentNoise": LatentNoise,
     "ImageNoise": ImageNoise,
+    "NextSeeds": NextSeeds,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LatentNoise": "Latent Noise",
     "ImageNoise": "Image Noise",
+    "NextSeeds": "Next Seeds",
 }

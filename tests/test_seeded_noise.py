@@ -7,7 +7,7 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.seeded_noise import ImageNoise, LatentNoise  # noqa: E402
+from src.seeded_noise import ImageNoise, LatentNoise, NextSeeds, generate_seed, next_seed_values  # noqa: E402
 
 
 def test_latent_noise_deterministic_for_seed():
@@ -97,3 +97,37 @@ def test_image_noise_respects_mask():
 
     expected = image * (1.0 - mask.unsqueeze(-1)) + full * mask.unsqueeze(-1)
     assert torch.allclose(masked, expected)
+
+
+def test_generate_seed_matches_expected_mixer_output():
+    assert generate_seed(1) == 0xB456BCFC34C2CB2C
+    assert generate_seed(0xFFFFFFFFFFFFFFFF) == 0x64B5720B4B825F21
+
+
+def test_next_seed_values_expand_zero_seed_into_distinct_nonzero_values():
+    seeds = next_seed_values(0, count=4)
+
+    assert len(seeds) == 4
+    assert len(set(seeds)) == 4
+    assert all(0 <= seed <= 0xFFFFFFFFFFFFFFFF for seed in seeds)
+    assert all(seed != 0 for seed in seeds)
+
+
+def test_next_seeds_node_returns_expected_seed_fanout():
+    node = NextSeeds()
+
+    outputs = node.next_seeds(123456789)
+
+    assert outputs == (
+        0x781E82BBFF6E8F64,
+        0x780CE7A5D373EB6F,
+        0x83E08B7E6BEBC732,
+        0x026450D10CF97BDE,
+    )
+
+
+def test_next_seed_values_wrap_input_at_64_bits():
+    wrapped = next_seed_values(0xFFFFFFFFFFFFFFFF, count=4)
+    masked = next_seed_values(-1, count=4)
+
+    assert wrapped == masked
