@@ -345,7 +345,39 @@ Expands one 64-bit seed into four deterministic 64-bit seed outputs using a Murm
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `seed` | `INT` | `0` | `0..2^64-1` | Base seed to fan out into `seed_1` through `seed_4`. |
+| `seed` | `INT` | `0` | `0..2^64-1` | Base ComfyUI seed. The node first treats it as an unsigned 64-bit integer, then derives four independent-looking child seeds from it. Use this when you want one master seed to drive four downstream nodes without manually picking related seed values. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `seed_1` | `INT` | First derived 64-bit seed. |
+| `seed_2` | `INT` | Second derived 64-bit seed. |
+| `seed_3` | `INT` | Third derived 64-bit seed. |
+| `seed_4` | `INT` | Fourth derived 64-bit seed. |
+
+##### How it works internally
+
+Starting from the input `seed`, the node creates four 64-bit stream values by adding a large fixed increment each time (`0x9E3779B97F4A7C15`, a golden-ratio-derived step commonly used for sequence spacing in hash/PRNG code). Each stream value is then passed through the 64-bit mixer:
+
+```python
+x = (x ^ (x >> 33)) & 0xFFFFFFFFFFFFFFFF
+x = (x * 0xff51afd7ed558ccd) & 0xFFFFFFFFFFFFFFFF
+x = (x ^ (x >> 33)) & 0xFFFFFFFFFFFFFFFF
+x = (x * 0xc4ceb9fe1a85ec53) & 0xFFFFFFFFFFFFFFFF
+x = (x ^ (x >> 33)) & 0xFFFFFFFFFFFFFFFF
+```
+
+This is the MurmurHash3 64-bit finalizer, used here as a strong bit-mixing function rather than as a full hash. Two practical details matter:
+
+- The arithmetic is masked back to `0..2^64-1` after each step, so the outputs stay valid ComfyUI 64-bit seeds.
+- The node mixes four offset stream values instead of repeatedly mixing the raw input directly. That avoids the `seed = 0` fixed-point case (`0` would otherwise mix back to `0`) and gives four distinct outputs even from simple nearby inputs.
+
+##### Notes
+
+- The mapping is fully deterministic: the same input `seed` always produces the same four outputs.
+- The outputs are intended for seed fan-out, not cryptography.
+- Negative values are not accepted by the node UI; if one is supplied programmatically, it is wrapped to unsigned 64-bit before mixing.
 
 ---
 

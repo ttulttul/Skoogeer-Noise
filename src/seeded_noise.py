@@ -268,7 +268,7 @@ class NextSeeds:
                     "default": 0,
                     "min": 0,
                     "max": _SEED_MASK_64,
-                    "tooltip": "Base 64-bit seed to expand into four deterministic derived seeds.",
+                    "tooltip": "Base 64-bit seed. The node treats it as an unsigned 64-bit value and derives four deterministic child seeds for downstream nodes.",
                 }),
             },
         }
