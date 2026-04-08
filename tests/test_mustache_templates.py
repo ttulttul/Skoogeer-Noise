@@ -7,7 +7,6 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import src.mustache_templates as mustache_templates  # noqa: E402
 from src.mustache_templates import (  # noqa: E402
     MustacheTemplate,
     MustacheVariableSampler,
@@ -122,6 +121,20 @@ def test_sample_mustache_variables_rejects_invalid_sampling_method():
         )
 
 
+def test_sample_mustache_variables_random_is_deterministic_for_seed():
+    variables = {
+        "haircolor": ["brown", "blonde", "black", "red"],
+        "leglength": ["short", "long", "weird", "impossible"],
+    }
+
+    first = sample_mustache_variables(variables, sampling_mode="random", seed=42)
+    second = sample_mustache_variables(variables, sampling_mode="random", seed=42)
+    third = sample_mustache_variables(variables, sampling_mode="random", seed=43)
+
+    assert first == second
+    assert first != third
+
+
 def test_mustache_variables_node_returns_typed_mapping():
     node = MustacheVariables()
 
@@ -154,6 +167,7 @@ def test_mustache_variable_sampler_sequential_returns_variables_and_limit():
     variables, limit = node.sample(
         {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
         "sequential",
+        0,
         3,
     )
 
@@ -161,40 +175,44 @@ def test_mustache_variable_sampler_sequential_returns_variables_and_limit():
     assert limit == 3
 
 
-def test_mustache_variable_sampler_random_reorders_values(monkeypatch):
-    def fake_sample(values, k):
-        assert k == len(values)
-        return list(reversed(values))
-
-    monkeypatch.setattr(mustache_templates.random, "sample", fake_sample)
-
+def test_mustache_variable_sampler_random_reorders_values_deterministically():
     node = MustacheVariableSampler()
-    variables, limit = node.sample(
-        {"haircolor": ["brown", "blonde"], "leglength": ["short", "long", "weird"]},
+    inputs = {"haircolor": ["brown", "blonde"], "leglength": ["short", "long", "weird"]}
+    first, limit = node.sample(
+        inputs,
         "random",
+        123,
+        -1,
+    )
+    second, second_limit = node.sample(
+        inputs,
+        "random",
+        123,
+        -1,
+    )
+    third, _ = node.sample(
+        inputs,
+        "random",
+        124,
         -1,
     )
 
-    assert variables == {
-        "haircolor": ["blonde", "brown"],
-        "leglength": ["weird", "long", "short"],
-    }
+    assert first == second
+    assert third != first
+    assert second_limit == -1
+    assert sorted(first["haircolor"]) == sorted(inputs["haircolor"])
+    assert sorted(first["leglength"]) == sorted(inputs["leglength"])
     assert limit == -1
 
 
-def test_mustache_variable_sampler_randomized_variables_affect_template_order(monkeypatch):
-    def fake_sample(values, k):
-        assert k == len(values)
-        return list(reversed(values))
-
-    monkeypatch.setattr(mustache_templates.random, "sample", fake_sample)
-
+def test_mustache_variable_sampler_randomized_variables_affect_template_order():
     sampler = MustacheVariableSampler()
     template = MustacheTemplate()
 
     sampled_variables, limit = sampler.sample(
         {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
         "random",
+        7,
         3,
     )
     (rendered,) = template.render(

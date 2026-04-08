@@ -22,3 +22,4 @@
 - ComfyUI can fan a `STRING` output into downstream text nodes by marking it with `OUTPUT_IS_LIST = (True,)`, which makes templated prompt expansion practical without needing a custom text-encode node.
 - Large template Cartesian products should be capped before materialization; sampling unique permutation indices from the mixed-radix product space lets a text-template node support random limited expansion without generating the full prompt list first.
 - When a text-template workflow needs external control wiring, it is cleaner to split permutation ordering from expansion itself: a sampler node can reorder `MUSTACHE_VARIABLES` and emit a passthrough `limit`, while the template node stays focused on deterministic rendering plus truncation.
+- If a sampler node exposes random ordering, it should use a local seeded RNG rather than process-global randomness so repeated graph executions stay reproducible in the standard ComfyUI seed-driven way.

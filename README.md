@@ -434,12 +434,13 @@ Passes a `MUSTACHE_VARIABLES` mapping through in either original or randomized p
 |------|------|---------|--------------|------|
 | `variables` | `MUSTACHE_VARIABLES` | – | – | Variable mapping to forward into `Mustache Template`. |
 | `sampling_mode` | enum | `sequential` | `sequential/random` | `sequential` preserves the original YAML order for each variable's values. `random` shuffles each variable's value list independently before expansion. |
+| `seed` | `INT` | `0` | `0..2^64-1` | 64-bit seed used when `sampling_mode = random`. The same seed yields the same per-variable shuffle order. |
 | `limit` | `INT` | `-1` | `-1..2147483647` | Suggested cap to forward into `Mustache Template`. `-1` means no limit. |
 
 ##### Notes
 
 - This node does not expand templates itself; it only prepares variable ordering and forwards a `limit`.
-- `random` mode shuffles each variable's candidate list, then `Mustache Template` traverses the resulting Cartesian product in that reordered sequence.
+- `random` mode shuffles each variable's candidate list with the provided `seed`, then `Mustache Template` traverses the resulting Cartesian product in that reordered sequence.
 
 ---
 

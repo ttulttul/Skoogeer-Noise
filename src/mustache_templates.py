@@ -11,6 +11,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 MustacheVariablesDict = Dict[str, List[str]]
+_SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
 
 _DEFAULT_VARIABLES_YAML = (
     "haircolor:\n"
@@ -113,20 +114,23 @@ def sample_mustache_variables(
     variables: MustacheVariablesDict,
     *,
     sampling_mode: str = "sequential",
+    seed: int = 0,
 ) -> MustacheVariablesDict:
     normalized_sampling_mode = _validate_sampling_method(sampling_mode)
     sampled_variables: MustacheVariablesDict = {}
+    rng = random.Random(int(seed) & _SEED_MASK_64)
 
     for key, values in variables.items():
         if normalized_sampling_mode == "random":
-            sampled_variables[key] = random.sample(values, k=len(values))
+            sampled_variables[key] = rng.sample(values, k=len(values))
         else:
             sampled_variables[key] = list(values)
 
     logger.debug(
-        "Sampled mustache variables using %s mode for %d keys.",
+        "Sampled mustache variables using %s mode for %d keys with seed=%d.",
         normalized_sampling_mode,
         len(sampled_variables),
+        int(seed) & _SEED_MASK_64,
     )
     return sampled_variables
 
@@ -269,6 +273,15 @@ class MustacheVariableSampler:
                         "original YAML order. 'random' shuffles each variable's value list."
                     ),
                 }),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": _SEED_MASK_64,
+                    "tooltip": (
+                        "64-bit seed used when sampling_mode is random. The same seed produces the same shuffled "
+                        "variable ordering."
+                    ),
+                }),
                 "limit": ("INT", {
                     "default": -1,
                     "min": -1,
@@ -280,17 +293,22 @@ class MustacheVariableSampler:
             },
         }
 
-    def sample(self, variables: MustacheVariablesDict, sampling_mode: str, limit: int):
+    def sample(self, variables: MustacheVariablesDict, sampling_mode: str, seed: int, limit: int):
         if not isinstance(variables, dict):
             raise ValueError(f"MUSTACHE_VARIABLES input must be a dictionary, got {type(variables).__name__}.")
 
-        sampled_variables = sample_mustache_variables(variables, sampling_mode=str(sampling_mode))
+        sampled_variables = sample_mustache_variables(
+            variables,
+            sampling_mode=str(sampling_mode),
+            seed=int(seed),
+        )
         normalized_limit = _normalize_limit(int(limit))
         output_limit = -1 if normalized_limit is None else normalized_limit
         logger.debug(
-            "MustacheVariableSampler node emitted %d variables with sampling_mode=%s and limit=%d.",
+            "MustacheVariableSampler node emitted %d variables with sampling_mode=%s seed=%d and limit=%d.",
             len(sampled_variables),
             str(sampling_mode),
+            int(seed) & _SEED_MASK_64,
             output_limit,
         )
         return (sampled_variables, output_limit)
