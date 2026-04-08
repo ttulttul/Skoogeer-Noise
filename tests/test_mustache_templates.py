@@ -8,6 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.mustache_templates import (  # noqa: E402
+    JoinTextList,
     MustacheTemplate,
     MustacheVariableSampler,
     MustacheVariables,
@@ -159,6 +160,24 @@ def test_mustache_template_node_returns_list_output():
         "The blonde fox has short legs.",
         "The blonde fox has long legs.",
     ]
+
+
+def test_join_text_list_joins_all_items_for_preview():
+    node = JoinTextList()
+
+    joined, count = node.join_text([
+        "The brown fox has short legs.",
+        "The brown fox has long legs.",
+        "The blonde fox has short legs.",
+    ])
+
+    assert node.INPUT_IS_LIST == (True,)
+    assert joined == (
+        "The brown fox has short legs.\n"
+        "The brown fox has long legs.\n"
+        "The blonde fox has short legs."
+    )
+    assert count == 3
 
 
 def test_mustache_variable_sampler_sequential_returns_variables():

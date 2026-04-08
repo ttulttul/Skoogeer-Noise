@@ -303,13 +303,42 @@ class MustacheVariableSampler:
         return (sampled_variables,)
 
 
+class JoinTextList:
+    CATEGORY = "text/debug"
+    RETURN_TYPES = ("STRING", "INT")
+    RETURN_NAMES = ("text", "count")
+    INPUT_IS_LIST = (True,)
+    FUNCTION = "join_text"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "text": ("STRING", {
+                    "tooltip": (
+                        "List of text values to join into a single previewable string. Connect a list-valued "
+                        "STRING output such as Mustache Template here."
+                    ),
+                }),
+            },
+        }
+
+    def join_text(self, text):
+        joined = "\n".join(str(item) for item in text)
+        count = len(text)
+        logger.debug("JoinTextList node joined %d text items into one preview string.", count)
+        return (joined, count)
+
+
 NODE_CLASS_MAPPINGS = {
+    "JoinTextList": JoinTextList,
     "MustacheVariables": MustacheVariables,
     "MustacheVariableSampler": MustacheVariableSampler,
     "MustacheTemplate": MustacheTemplate,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "JoinTextList": "Join Text List",
     "MustacheVariables": "Mustache Variables",
     "MustacheVariableSampler": "Mustache Variable Sampler",
     "MustacheTemplate": "Mustache Template",

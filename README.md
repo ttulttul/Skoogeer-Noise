@@ -150,6 +150,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Mustache Variables](#mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
+| [Join Text List](#join-text-list) | `text/debug` | `STRING`, `INT` |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
 | [Image Batch to Latent](#image-batch-to-latent) | `latent/debug` | `LATENT` |
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
@@ -485,6 +486,35 @@ The man has blonde hair and weird legs.
 - Templates with no placeholders return a single-item list containing the original text.
 - Referencing a missing variable raises an error instead of silently leaving `{{name}}` in place.
 - To randomize the prompt order, place `Mustache Variable Sampler` before this node and set its `sampling_mode` to `random`.
+- ComfyUI's built-in `Preview as Text` typically only shows the first item from a list-valued `STRING` output. Use `Join Text List` before previewing if you want to inspect the whole rendered batch.
+
+---
+
+#### Join Text List
+
+Consumes a list-valued `STRING` input and joins every item into one newline-delimited string so preview/debug nodes can show the whole batch at once.
+
+- **Menu category:** `text/debug`
+- **Returns:** `STRING`, `INT`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `text` | `STRING` list | – | – | List-valued string input, such as the output of `Mustache Template`. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `text` | `STRING` | All list items joined with newline separators. |
+| `count` | `INT` | Number of input strings that were joined. |
+
+##### Typical usage
+
+```text
+Mustache Template -> Join Text List -> Preview as Text
+```
 
 ---
 
