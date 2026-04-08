@@ -20,3 +20,4 @@
 - A robust seed fan-out node should not feed raw `0` directly through the MurmurHash3 64-bit finalizer, because `0` stays `0`; offsetting independent 64-bit streams before mixing avoids the all-zero trap while keeping deterministic seed derivation.
 - The pack's NumPy usage is limited to stable ndarray operations in the latent stats preview path, so the dependency floor can be relaxed from `numpy>=2.0` to `numpy>=1.26` without touching runtime behavior.
 - ComfyUI can fan a `STRING` output into downstream text nodes by marking it with `OUTPUT_IS_LIST = (True,)`, which makes templated prompt expansion practical without needing a custom text-encode node.
+- Large template Cartesian products should be capped before materialization; sampling unique permutation indices from the mixed-radix product space lets a text-template node support random limited expansion without generating the full prompt list first.
