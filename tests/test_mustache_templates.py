@@ -161,64 +161,56 @@ def test_mustache_template_node_returns_list_output():
     ]
 
 
-def test_mustache_variable_sampler_sequential_returns_variables_and_limit():
+def test_mustache_variable_sampler_sequential_returns_variables():
     node = MustacheVariableSampler()
 
-    variables, limit = node.sample(
+    (variables,) = node.sample(
         {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
         "sequential",
         0,
-        3,
     )
 
     assert variables == {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]}
-    assert limit == 3
 
 
 def test_mustache_variable_sampler_random_reorders_values_deterministically():
     node = MustacheVariableSampler()
     inputs = {"haircolor": ["brown", "blonde"], "leglength": ["short", "long", "weird"]}
-    first, limit = node.sample(
+    (first,) = node.sample(
         inputs,
         "random",
         123,
-        -1,
     )
-    second, second_limit = node.sample(
+    (second,) = node.sample(
         inputs,
         "random",
         123,
-        -1,
     )
-    third, _ = node.sample(
+    (third,) = node.sample(
         inputs,
         "random",
         124,
-        -1,
     )
 
     assert first == second
     assert third != first
-    assert second_limit == -1
     assert sorted(first["haircolor"]) == sorted(inputs["haircolor"])
     assert sorted(first["leglength"]) == sorted(inputs["leglength"])
-    assert limit == -1
 
 
 def test_mustache_variable_sampler_randomized_variables_affect_template_order():
     sampler = MustacheVariableSampler()
     template = MustacheTemplate()
 
-    sampled_variables, limit = sampler.sample(
+    (sampled_variables,) = sampler.sample(
         {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
         "random",
         7,
-        3,
     )
     (rendered,) = template.render(
         sampled_variables,
         "The {{haircolor}} fox has {{leglength}} legs.",
-        limit,
+        3,
     )
 
     assert rendered == [

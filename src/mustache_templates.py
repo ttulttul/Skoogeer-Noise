@@ -255,8 +255,8 @@ class MustacheTemplate:
 
 class MustacheVariableSampler:
     CATEGORY = "text/template"
-    RETURN_TYPES = ("MUSTACHE_VARIABLES", "INT")
-    RETURN_NAMES = ("variables", "limit")
+    RETURN_TYPES = ("MUSTACHE_VARIABLES",)
+    RETURN_NAMES = ("variables",)
     FUNCTION = "sample"
 
     @classmethod
@@ -282,18 +282,10 @@ class MustacheVariableSampler:
                         "variable ordering."
                     ),
                 }),
-                "limit": ("INT", {
-                    "default": -1,
-                    "min": -1,
-                    "max": 2147483647,
-                    "tooltip": (
-                        "Suggested permutation cap to forward into Mustache Template. Use -1 to mean no limit."
-                    ),
-                }),
             },
         }
 
-    def sample(self, variables: MustacheVariablesDict, sampling_mode: str, seed: int, limit: int):
+    def sample(self, variables: MustacheVariablesDict, sampling_mode: str, seed: int):
         if not isinstance(variables, dict):
             raise ValueError(f"MUSTACHE_VARIABLES input must be a dictionary, got {type(variables).__name__}.")
 
@@ -302,16 +294,13 @@ class MustacheVariableSampler:
             sampling_mode=str(sampling_mode),
             seed=int(seed),
         )
-        normalized_limit = _normalize_limit(int(limit))
-        output_limit = -1 if normalized_limit is None else normalized_limit
         logger.debug(
-            "MustacheVariableSampler node emitted %d variables with sampling_mode=%s seed=%d and limit=%d.",
+            "MustacheVariableSampler node emitted %d variables with sampling_mode=%s seed=%d.",
             len(sampled_variables),
             str(sampling_mode),
             int(seed) & _SEED_MASK_64,
-            output_limit,
         )
-        return (sampled_variables, output_limit)
+        return (sampled_variables,)
 
 
 NODE_CLASS_MAPPINGS = {
