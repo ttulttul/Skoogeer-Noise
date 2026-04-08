@@ -30,6 +30,10 @@ if __package__:
         NODE_CLASS_MAPPINGS as NOISE_NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS as NOISE_DISPLAY_NAME_MAPPINGS,
     )
+    from .src.mustache_templates import (  # type: ignore[attr-defined] # noqa: F401
+        NODE_CLASS_MAPPINGS as MUSTACHE_NODE_CLASS_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS as MUSTACHE_DISPLAY_NAME_MAPPINGS,
+    )
     from .src.fluid_advection import (  # type: ignore[attr-defined] # noqa: F401
         NODE_CLASS_MAPPINGS as FLUID_NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS as FLUID_DISPLAY_NAME_MAPPINGS,
@@ -66,6 +70,7 @@ else:  # pragma: no cover - direct execution fallback
     )
     drag_module = _load_module_from_path("latent_mesh_drag", _ROOT_DIR / "src" / "latent_mesh_drag.py")
     noise_module = _load_module_from_path("seeded_noise", _ROOT_DIR / "src" / "seeded_noise.py")
+    mustache_module = _load_module_from_path("mustache_templates", _ROOT_DIR / "src" / "mustache_templates.py")
     fluid_module = _load_module_from_path("fluid_advection", _ROOT_DIR / "src" / "fluid_advection.py")
     freq_module = _load_module_from_path(
         "latent_frequency_domain", _ROOT_DIR / "src" / "latent_frequency_domain.py"
@@ -84,6 +89,8 @@ else:  # pragma: no cover - direct execution fallback
     DRAG_DISPLAY_NAME_MAPPINGS = getattr(drag_module, "NODE_DISPLAY_NAME_MAPPINGS")
     NOISE_NODE_CLASS_MAPPINGS = getattr(noise_module, "NODE_CLASS_MAPPINGS")
     NOISE_DISPLAY_NAME_MAPPINGS = getattr(noise_module, "NODE_DISPLAY_NAME_MAPPINGS")
+    MUSTACHE_NODE_CLASS_MAPPINGS = getattr(mustache_module, "NODE_CLASS_MAPPINGS")
+    MUSTACHE_DISPLAY_NAME_MAPPINGS = getattr(mustache_module, "NODE_DISPLAY_NAME_MAPPINGS")
     FLUID_NODE_CLASS_MAPPINGS = getattr(fluid_module, "NODE_CLASS_MAPPINGS")
     FLUID_DISPLAY_NAME_MAPPINGS = getattr(fluid_module, "NODE_DISPLAY_NAME_MAPPINGS")
     FREQ_NODE_CLASS_MAPPINGS = getattr(freq_module, "NODE_CLASS_MAPPINGS")
@@ -104,6 +111,7 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     **CHANNEL_OP_NODE_CLASS_MAPPINGS,
     **FLUID_NODE_CLASS_MAPPINGS,
     **FREQ_NODE_CLASS_MAPPINGS,
+    **MUSTACHE_NODE_CLASS_MAPPINGS,
     **NOISE_NODE_CLASS_MAPPINGS,
     **LATENT_TO_IMAGE_NODE_CLASS_MAPPINGS,
     **QWEN_NOISE_NODE_CLASS_MAPPINGS,
@@ -116,6 +124,7 @@ NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     **CHANNEL_OP_DISPLAY_NAME_MAPPINGS,
     **FLUID_DISPLAY_NAME_MAPPINGS,
     **FREQ_DISPLAY_NAME_MAPPINGS,
+    **MUSTACHE_DISPLAY_NAME_MAPPINGS,
     **NOISE_DISPLAY_NAME_MAPPINGS,
     **LATENT_TO_IMAGE_DISPLAY_NAME_MAPPINGS,
     **QWEN_NOISE_DISPLAY_NAME_MAPPINGS,
