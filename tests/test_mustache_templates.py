@@ -163,6 +163,29 @@ def test_sample_mustache_variable_list_random_samples_full_permutations():
         assert set(item.keys()) == {"haircolor", "leglength", "hat"}
 
 
+def test_sample_mustache_variable_list_random_handles_population_above_ssize_t():
+    variables = {f"v{i}": ["0", "1"] for i in range(70)}
+
+    first = sample_mustache_variable_list(
+        variables,
+        sampling_mode="random",
+        seed=123,
+        limit=4,
+    )
+    second = sample_mustache_variable_list(
+        variables,
+        sampling_mode="random",
+        seed=123,
+        limit=4,
+    )
+
+    assert first == second
+    assert len(first) == 4
+    assert len({frozenset(item.items()) for item in first}) == 4
+    for item in first:
+        assert set(item.keys()) == set(variables.keys())
+
+
 def test_sample_mustache_variable_list_empty_variables_returns_single_empty_setting():
     assert sample_mustache_variable_list({}, limit=-1) == [{}]
 

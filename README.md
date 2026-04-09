@@ -448,6 +448,7 @@ Expands a `MUSTACHE_VARIABLES` mapping into a `MUSTACHE_VARIABLE_LIST`, where ea
 
 - This node now owns permutation generation, so large Cartesian products can be capped before `Mustache Template` runs.
 - In `random` mode, the sampler does not merely shuffle value lists. It randomizes key order, value order, and the emitted permutation order so the resulting `MUSTACHE_VARIABLE_LIST` is a seeded random subset/permutation of the full space.
+- When `limit` is finite, random sampling draws unique permutation indices directly from the full mixed-radix space in `O(limit)` time and memory. It does not rely on `random.sample(range(...))`, so it still works when the total permutation count is larger than Python's `Py_ssize_t` range.
 
 ---
 

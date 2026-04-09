@@ -217,6 +217,28 @@ def _variable_setting_for_index(
     return dict(zip(ordered_keys, chosen_values, strict=True))
 
 
+def _sample_unique_indices(total_count: int, sample_count: int, rng: random.Random) -> List[int]:
+    if sample_count < 0:
+        raise ValueError(f"sample_count must be >= 0, got {sample_count}.")
+    if sample_count > total_count:
+        raise ValueError(f"sample_count must be <= total_count, got {sample_count} > {total_count}.")
+    if sample_count == 0:
+        return []
+
+    # Floyd's algorithm samples k distinct integers from [0, n) in O(k) time and memory
+    # without relying on range lengths that have to fit into Py_ssize_t.
+    selected: dict[int, int] = {}
+    sampled_indices: List[int] = []
+    for candidate in range(total_count - sample_count, total_count):
+        draw = rng.randrange(candidate + 1)
+        chosen = selected.get(draw, draw)
+        selected[draw] = selected.get(candidate, candidate)
+        sampled_indices.append(chosen)
+
+    rng.shuffle(sampled_indices)
+    return sampled_indices
+
+
 def sample_mustache_variable_list(
     variables: MustacheVariablesDict,
     *,
@@ -256,7 +278,7 @@ def sample_mustache_variable_list(
 
     sampled_variables: MustacheVariableList = []
     if normalized_sampling_mode == "random":
-        sampled_indices = rng.sample(range(total_permutations), sample_count)
+        sampled_indices = _sample_unique_indices(total_permutations, sample_count, rng)
         sampled_variables = [
             _variable_setting_for_index(ordered_keys, value_sets, permutation_index)
             for permutation_index in sampled_indices
