@@ -8,6 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.mustache_templates import (  # noqa: E402
+    ConcatenateLists,
     JoinTextList,
     MustacheTemplate,
     MustacheVariableSampler,
@@ -421,6 +422,28 @@ def test_reorder_list_shuffle_is_deterministic_for_seed():
     assert first == second
     assert sorted(first) == [1, 2, 3, 4]
     assert first != third
+
+
+def test_concatenate_lists_joins_mustache_variable_list_batches():
+    node = ConcatenateLists()
+
+    (items,) = node.concatenate(
+        [
+            {"animal": "fox", "lens": "35mm"},
+            {"animal": "wolf", "lens": "50mm"},
+        ],
+        [
+            {"animal": "cat", "lens": "85mm"},
+        ],
+    )
+
+    assert node.INPUT_IS_LIST == (True, True)
+    assert node.OUTPUT_IS_LIST == (True,)
+    assert items == [
+        {"animal": "fox", "lens": "35mm"},
+        {"animal": "wolf", "lens": "50mm"},
+        {"animal": "cat", "lens": "85mm"},
+    ]
 
 
 def test_parse_mustache_variables_yaml_rejects_nested_values():

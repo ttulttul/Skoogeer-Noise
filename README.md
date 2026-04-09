@@ -151,6 +151,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
 | [Join Text List](#join-text-list) | `text/debug` | `STRING`, `INT` |
+| [Concatenate Lists](#concatenate-lists) | `utils/list` | list |
 | [Reorder List](#reorder-list) | `utils/list` | list |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
 | [Image Batch to Latent](#image-batch-to-latent) | `latent/debug` | `LATENT` |
@@ -551,6 +552,33 @@ Reorders a list-valued input without changing the item type. This is a generic u
 
 - This node is list-aware and intended for list-valued sockets such as `STRING` lists coming out of `Mustache Template`.
 - `reverse` ignores `seed`.
+
+---
+
+#### Concatenate Lists
+
+Concatenates two list-valued inputs into one list without changing the item type. This is useful for combining multiple `MUSTACHE_VARIABLE_LIST` branches before sending them into `Mustache Template`.
+
+- **Menu category:** `utils/list`
+- **Returns:** list of the same item type
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `items_1` | list | – | – | First list-valued input. |
+| `items_2` | list | – | – | Second list-valued input, appended after `items_1`. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `items` | list | Concatenation of `items_1` followed by `items_2`. |
+
+##### Notes
+
+- This node is generic and works with `MUSTACHE_VARIABLE_LIST`, `STRING` lists, and other list-valued sockets.
+- For the mustache workflow, the list-valued node is `Mustache Variable Sampler`; `Mustache Variables` itself still returns a `MUSTACHE_VARIABLES` mapping.
 
 ---
 

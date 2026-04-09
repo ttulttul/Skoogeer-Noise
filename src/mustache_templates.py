@@ -585,7 +585,40 @@ class ReorderList:
         return (reordered,)
 
 
+class ConcatenateLists:
+    CATEGORY = "utils/list"
+    RETURN_TYPES = ("*",)
+    RETURN_NAMES = ("items",)
+    INPUT_IS_LIST = (True, True)
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "concatenate"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "items_1": ("*", {
+                    "tooltip": "First list-valued input to concatenate.",
+                }),
+                "items_2": ("*", {
+                    "tooltip": "Second list-valued input to concatenate after items_1.",
+                }),
+            },
+        }
+
+    def concatenate(self, items_1, items_2):
+        combined = list(items_1) + list(items_2)
+        logger.debug(
+            "ConcatenateLists node concatenated %d and %d items into %d items.",
+            len(items_1),
+            len(items_2),
+            len(combined),
+        )
+        return (combined,)
+
+
 NODE_CLASS_MAPPINGS = {
+    "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
     "MustacheVariables": MustacheVariables,
     "MustacheVariableSampler": MustacheVariableSampler,
@@ -594,6 +627,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
     "MustacheVariables": "Mustache Variables",
     "MustacheVariableSampler": "Mustache Variable Sampler",
