@@ -26,3 +26,4 @@
 - ComfyUI's built-in `Preview as Text` is not reliable for inspecting list-valued `STRING` outputs item-by-item, so a small `INPUT_IS_LIST` join node is a practical way to collapse a text batch into one previewable string without changing downstream list semantics.
 - On `INPUT_IS_LIST` nodes, ComfyUI passes widget inputs like enums and integers as singleton lists too, so generic list-processing nodes need to unwrap those control values before using them.
 - Making `Mustache Variables` list-aware is a clean way to support higher-order templating: a list of rendered YAML fragments can be merged into one `MUSTACHE_VARIABLES` mapping by appending repeated keys in input order.
+- In practice, templated YAML fragments may parse as a YAML list of mappings rather than a single mapping, so `Mustache Variables` needs to normalize both top-level shapes to avoid brittle chaining behavior.

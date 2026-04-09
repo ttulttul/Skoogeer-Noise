@@ -49,6 +49,24 @@ def test_parse_mustache_variables_yaml_wraps_scalar_values():
     }
 
 
+def test_parse_mustache_variables_yaml_accepts_list_of_mappings():
+    variables = parse_mustache_variables_yaml(
+        "- haircolor:\n"
+        "  - brown\n"
+        "  - blonde\n"
+        "- leglength:\n"
+        "  - short\n"
+        "  - long\n"
+        "- haircolor:\n"
+        "  - black\n"
+    )
+
+    assert variables == {
+        "haircolor": ["brown", "blonde", "black"],
+        "leglength": ["short", "long"],
+    }
+
+
 def test_parse_mustache_variables_inputs_merges_multiple_yaml_strings():
     variables = parse_mustache_variables_inputs([
         "haircolor:\n  - brown\n  - blonde\n",
@@ -60,6 +78,11 @@ def test_parse_mustache_variables_inputs_merges_multiple_yaml_strings():
         "haircolor": ["brown", "blonde", "black"],
         "leglength": ["short", "long"],
     }
+
+
+def test_parse_mustache_variables_yaml_rejects_list_items_that_are_not_mappings():
+    with pytest.raises(ValueError, match="lists must contain mappings"):
+        parse_mustache_variables_yaml("- just\n- strings\n")
 
 
 def test_extract_template_variables_preserves_first_appearance_order():

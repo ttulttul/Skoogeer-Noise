@@ -39,6 +39,45 @@ def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
     return str(value)
 
 
+def _merge_parsed_mustache_variables(parsed, *, variables: MustacheVariablesDict) -> None:
+    if parsed is None:
+        return
+
+    if isinstance(parsed, list):
+        for index, item in enumerate(parsed):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Mustache variables YAML lists must contain mappings, "
+                    f"got {type(item).__name__} at list index {index}."
+                )
+            _merge_parsed_mustache_variables(item, variables=variables)
+        return
+
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "Mustache variables YAML must parse to a mapping or a list of mappings, "
+            f"got {type(parsed).__name__}."
+        )
+
+    for raw_key, raw_values in parsed.items():
+        key = str(raw_key).strip()
+        if not key:
+            raise ValueError("Mustache variable names must be non-empty.")
+
+        if isinstance(raw_values, list):
+            values = [_coerce_yaml_scalar_to_string(item, variable_name=key) for item in raw_values]
+        else:
+            values = [_coerce_yaml_scalar_to_string(raw_values, variable_name=key)]
+
+        if not values:
+            raise ValueError(f"Mustache variable '{key}' must contain at least one value.")
+
+        if key not in variables:
+            variables[key] = list(values)
+        else:
+            variables[key].extend(values)
+
+
 def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
     text = str(yaml_text or "").strip()
     if not text:
@@ -53,24 +92,9 @@ def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
     if parsed is None:
         logger.debug("Mustache variables YAML parsed to None; returning an empty variable set.")
         return {}
-    if not isinstance(parsed, dict):
-        raise ValueError(f"Mustache variables YAML must parse to a mapping, got {type(parsed).__name__}.")
 
     variables: MustacheVariablesDict = {}
-    for raw_key, raw_values in parsed.items():
-        key = str(raw_key).strip()
-        if not key:
-            raise ValueError("Mustache variable names must be non-empty.")
-
-        if isinstance(raw_values, list):
-            values = [_coerce_yaml_scalar_to_string(item, variable_name=key) for item in raw_values]
-        else:
-            values = [_coerce_yaml_scalar_to_string(raw_values, variable_name=key)]
-
-        if not values:
-            raise ValueError(f"Mustache variable '{key}' must contain at least one value.")
-
-        variables[key] = values
+    _merge_parsed_mustache_variables(parsed, variables=variables)
 
     logger.debug("Parsed %d mustache variables from YAML: %s", len(variables), tuple(variables.keys()))
     return variables

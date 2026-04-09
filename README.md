@@ -401,7 +401,7 @@ Parses a YAML mapping of variable names to candidate values and packages it as a
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `yaml_text` | `STRING` or `STRING` list | sample YAML | multiline | YAML mapping of variable names to values. Lists are the normal form; scalar values are accepted as shorthand and are wrapped into a one-item list. Each final value is coerced to text before rendering. When a list of YAML strings is provided, all mappings are merged together. |
+| `yaml_text` | `STRING` or `STRING` list | sample YAML | multiline | YAML mapping of variable names to values, or a YAML list of mappings. Lists of scalar values are the normal form for each variable; scalar values are accepted as shorthand and are wrapped into a one-item list. Each final value is coerced to text before rendering. When a list of YAML strings is provided, all mappings are merged together. |
 
 ##### Example YAML
 
@@ -417,7 +417,7 @@ leglength:
 
 ##### Notes
 
-- YAML must parse to a mapping at the top level.
+- YAML must parse to a mapping or to a list of mappings at the top level.
 - Nested objects and nested lists inside variable values are rejected.
 - Empty input returns an empty variable set.
 - When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
