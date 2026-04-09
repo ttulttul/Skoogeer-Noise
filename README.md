@@ -499,7 +499,7 @@ The man has blonde hair and weird legs.
 
 #### Join Text List
 
-Consumes a list-valued `STRING` input and joins every item into one newline-delimited string so preview/debug nodes can show the whole batch at once.
+Consumes a list-valued `STRING` input and joins every item into one string so preview/debug nodes can show the whole batch at once.
 
 - **Menu category:** `text/debug`
 - **Returns:** `STRING`, `INT`
@@ -509,12 +509,13 @@ Consumes a list-valued `STRING` input and joins every item into one newline-deli
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `text` | `STRING` list | – | – | List-valued string input, such as the output of `Mustache Template`. |
+| `separator` | `STRING` | `\n` | multiline | Text inserted between each item. Escape sequences like `\n`, `\r`, and `\t` are decoded, so values like `\n===\n` produce visible section breaks. |
 
 ##### Outputs
 
 | Output | Type | Description |
 |------|------|-------------|
-| `text` | `STRING` | All list items joined with newline separators. |
+| `text` | `STRING` | All list items joined with the requested separator. |
 | `count` | `INT` | Number of input strings that were joined. |
 
 ##### Typical usage

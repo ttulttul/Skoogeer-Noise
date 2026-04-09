@@ -373,7 +373,7 @@ def test_join_text_list_joins_all_items_for_preview():
         "The brown fox has short legs.",
         "The brown fox has long legs.",
         "The blonde fox has short legs.",
-    ])
+    ], "\\n")
 
     assert node.INPUT_IS_LIST == (True,)
     assert joined == (
@@ -381,6 +381,19 @@ def test_join_text_list_joins_all_items_for_preview():
         "The brown fox has long legs.\n"
         "The blonde fox has short legs."
     )
+    assert count == 3
+
+
+def test_join_text_list_accepts_custom_escaped_separator():
+    node = JoinTextList()
+
+    joined, count = node.join_text([
+        "alpha",
+        "beta",
+        "gamma",
+    ], "\\n===\\n")
+
+    assert joined == "alpha\n===\nbeta\n===\ngamma"
     assert count == 3
 
 

@@ -214,6 +214,15 @@ def _render_template_with_mapping(template_text: str, mapping: Dict[str, str]) -
     return _MUSTACHE_VARIABLE_PATTERN.sub(lambda match: mapping[match.group(1).strip()], template_text)
 
 
+def _decode_text_separator(separator: str) -> str:
+    return (
+        str(separator)
+        .replace("\\r", "\r")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+    )
+
+
 def _variable_setting_for_index(
     ordered_keys: Sequence[str],
     value_sets: Sequence[Sequence[str]],
@@ -505,13 +514,26 @@ class JoinTextList:
                         "STRING output such as Mustache Template here."
                     ),
                 }),
+                "separator": ("STRING", {
+                    "default": "\\n",
+                    "multiline": True,
+                    "tooltip": (
+                        "Separator inserted between each text item. Escape sequences like \\n, \\r, and \\t are "
+                        "decoded, so values like \\n===\\n work as expected."
+                    ),
+                }),
             },
         }
 
-    def join_text(self, text):
-        joined = "\n".join(str(item) for item in text)
+    def join_text(self, text, separator):
+        decoded_separator = _decode_text_separator(separator)
+        joined = decoded_separator.join(str(item) for item in text)
         count = len(text)
-        logger.debug("JoinTextList node joined %d text items into one preview string.", count)
+        logger.debug(
+            "JoinTextList node joined %d text items into one preview string using separator length %d.",
+            count,
+            len(decoded_separator),
+        )
         return (joined, count)
 
 
