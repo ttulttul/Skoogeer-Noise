@@ -206,6 +206,17 @@ def test_sample_mustache_variable_list_rejects_invalid_sampling_method():
         )
 
 
+def test_sample_mustache_variable_list_requires_limit_for_large_unbounded_space():
+    variables = {f"v{i}": ["0", "1"] for i in range(17)}
+
+    with pytest.raises(ValueError, match="Set a finite limit when the permutation space is large"):
+        sample_mustache_variable_list(
+            variables,
+            sampling_mode="random",
+            limit=-1,
+        )
+
+
 def test_render_mustache_template_list_renders_each_variable_setting():
     rendered = render_mustache_template_list(
         "The {{haircolor}} fox has {{leglength}} legs.",

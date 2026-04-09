@@ -27,6 +27,7 @@ _DEFAULT_TEMPLATE = "The man has {{haircolor}} hair and {{leglength}} legs."
 _MUSTACHE_VARIABLE_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
 _SAMPLING_METHODS = ("sequential", "random")
 _REORDER_MODES = ("shuffle", "reverse")
+_MAX_UNBOUNDED_VARIABLE_SETTINGS = 100_000
 
 
 def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
@@ -196,6 +197,19 @@ def _count_permutations(value_sets: Sequence[Sequence[str]]) -> int:
     return total
 
 
+def _resolve_sample_count(total_permutations: int, normalized_limit: int | None, sampling_mode: str) -> int:
+    if normalized_limit is None:
+        if total_permutations > _MAX_UNBOUNDED_VARIABLE_SETTINGS:
+            raise ValueError(
+                "Mustache Variable Sampler would emit "
+                f"{total_permutations} variable settings in {sampling_mode} mode with no limit. "
+                "Set a finite limit when the permutation space is large."
+            )
+        return total_permutations
+
+    return min(normalized_limit, total_permutations)
+
+
 def _render_template_with_mapping(template_text: str, mapping: Dict[str, str]) -> str:
     return _MUSTACHE_VARIABLE_PATTERN.sub(lambda match: mapping[match.group(1).strip()], template_text)
 
@@ -274,7 +288,7 @@ def sample_mustache_variable_list(
         value_sets.append(values)
 
     total_permutations = _count_permutations(value_sets)
-    sample_count = total_permutations if normalized_limit is None else min(normalized_limit, total_permutations)
+    sample_count = _resolve_sample_count(total_permutations, normalized_limit, normalized_sampling_mode)
 
     sampled_variables: MustacheVariableList = []
     if normalized_sampling_mode == "random":

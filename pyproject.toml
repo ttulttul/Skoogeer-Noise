@@ -2,7 +2,7 @@
 name = "comfyui-skoogeer-noise"
 description = "Noise, text templating, conditioning, and perturbation utility nodes for ComfyUI (procedural noise, mesh drag, latent channel stats preview)."
 dependencies = ["numpy>=1.26", "torch>=2.1", "einops>=0.7", "pyyaml>=6.0.3"]
-version = "1.2.40"
+version = "1.2.41"
 license = "MIT"
 classifiers = [
     "Operating System :: OS Independent",
