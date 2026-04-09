@@ -24,3 +24,4 @@
 - For large templated prompt spaces, the cleanest split is to have the sampler own permutation generation and limits, emitting a concrete `MUSTACHE_VARIABLE_LIST`; the template node can then become a pure renderer over already-sampled variable assignments.
 - If a sampler node exposes random ordering, it should use a local seeded RNG rather than process-global randomness so repeated graph executions stay reproducible in the standard ComfyUI seed-driven way.
 - ComfyUI's built-in `Preview as Text` is not reliable for inspecting list-valued `STRING` outputs item-by-item, so a small `INPUT_IS_LIST` join node is a practical way to collapse a text batch into one previewable string without changing downstream list semantics.
+- On `INPUT_IS_LIST` nodes, ComfyUI passes widget inputs like enums and integers as singleton lists too, so generic list-processing nodes need to unwrap those control values before using them.

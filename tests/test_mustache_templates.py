@@ -12,6 +12,7 @@ from src.mustache_templates import (  # noqa: E402
     MustacheTemplate,
     MustacheVariableSampler,
     MustacheVariables,
+    ReorderList,
     extract_template_variables,
     parse_mustache_variables_yaml,
     render_mustache_template_list,
@@ -241,6 +242,32 @@ def test_join_text_list_joins_all_items_for_preview():
         "The blonde fox has short legs."
     )
     assert count == 3
+
+
+def test_reorder_list_reverse_returns_reversed_items():
+    node = ReorderList()
+
+    (items,) = node.reorder(
+        ["alpha", "beta", "gamma"],
+        ["reverse"],
+        [123],
+    )
+
+    assert node.INPUT_IS_LIST is True
+    assert node.OUTPUT_IS_LIST == (True,)
+    assert items == ["gamma", "beta", "alpha"]
+
+
+def test_reorder_list_shuffle_is_deterministic_for_seed():
+    node = ReorderList()
+
+    (first,) = node.reorder([1, 2, 3, 4], ["shuffle"], [42])
+    (second,) = node.reorder([1, 2, 3, 4], ["shuffle"], [42])
+    (third,) = node.reorder([1, 2, 3, 4], ["shuffle"], [43])
+
+    assert first == second
+    assert sorted(first) == [1, 2, 3, 4]
+    assert first != third
 
 
 def test_parse_mustache_variables_yaml_rejects_nested_values():

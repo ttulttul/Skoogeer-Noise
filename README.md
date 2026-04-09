@@ -151,6 +151,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
 | [Join Text List](#join-text-list) | `text/debug` | `STRING`, `INT` |
+| [Reorder List](#reorder-list) | `utils/list` | list |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
 | [Image Batch to Latent](#image-batch-to-latent) | `latent/debug` | `LATENT` |
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
@@ -514,6 +515,34 @@ Consumes a list-valued `STRING` input and joins every item into one newline-deli
 ```text
 Mustache Template -> Join Text List -> Preview as Text
 ```
+
+---
+
+#### Reorder List
+
+Reorders a list-valued input without changing the item type. This is a generic utility node that can reverse any list or apply a seeded shuffle.
+
+- **Menu category:** `utils/list`
+- **Returns:** list of the same item type
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `items` | list | – | – | List-valued input to reorder. |
+| `mode` | enum | `shuffle` | `shuffle/reverse` | `shuffle` applies a seeded random permutation. `reverse` flips the list order. |
+| `seed` | `INT` | `0` | `0..2^64-1` | 64-bit seed used when `mode = shuffle`. The same seed yields the same permutation. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `items` | list | Reordered list of the same item type as the input. |
+
+##### Notes
+
+- This node is list-aware and intended for list-valued sockets such as `STRING` lists coming out of `Mustache Template`.
+- `reverse` ignores `seed`.
 
 ---
 

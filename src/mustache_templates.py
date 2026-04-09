@@ -26,6 +26,7 @@ _DEFAULT_VARIABLES_YAML = (
 _DEFAULT_TEMPLATE = "The man has {{haircolor}} hair and {{leglength}} legs."
 _MUSTACHE_VARIABLE_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
 _SAMPLING_METHODS = ("sequential", "random")
+_REORDER_MODES = ("shuffle", "reverse")
 
 
 def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
@@ -91,6 +92,13 @@ def _validate_sampling_method(sampling_method: str) -> str:
     if method not in _SAMPLING_METHODS:
         raise ValueError(f"sampling_method must be one of {_SAMPLING_METHODS}, got '{sampling_method}'.")
     return method
+
+
+def _validate_reorder_mode(mode: str) -> str:
+    normalized_mode = str(mode).strip().lower()
+    if normalized_mode not in _REORDER_MODES:
+        raise ValueError(f"mode must be one of {_REORDER_MODES}, got '{mode}'.")
+    return normalized_mode
 
 
 def _normalize_limit(limit: int) -> int | None:
@@ -378,11 +386,60 @@ class JoinTextList:
         return (joined, count)
 
 
+class ReorderList:
+    CATEGORY = "utils/list"
+    RETURN_TYPES = ("*",)
+    RETURN_NAMES = ("items",)
+    INPUT_IS_LIST = True
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "reorder"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "items": ("*", {
+                    "tooltip": "List-valued input to reorder. The node preserves the item type and returns a reordered list.",
+                }),
+                "mode": (_REORDER_MODES, {
+                    "default": "shuffle",
+                    "tooltip": "Reordering strategy. 'shuffle' applies a seeded random permutation. 'reverse' flips the list order.",
+                }),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": _SEED_MASK_64,
+                    "tooltip": "64-bit seed used when mode is shuffle. The same seed yields the same permutation.",
+                }),
+            },
+        }
+
+    def reorder(self, items, mode, seed):
+        normalized_mode = _validate_reorder_mode(mode[0] if isinstance(mode, list) and mode else mode)
+        seed_value = int(seed[0] if isinstance(seed, list) and seed else seed) & _SEED_MASK_64
+        values = list(items)
+
+        if normalized_mode == "reverse":
+            reordered = list(reversed(values))
+        else:
+            rng = random.Random(seed_value)
+            reordered = rng.sample(values, k=len(values))
+
+        logger.debug(
+            "ReorderList node reordered %d items using mode=%s seed=%d.",
+            len(reordered),
+            normalized_mode,
+            seed_value,
+        )
+        return (reordered,)
+
+
 NODE_CLASS_MAPPINGS = {
     "JoinTextList": JoinTextList,
     "MustacheVariables": MustacheVariables,
     "MustacheVariableSampler": MustacheVariableSampler,
     "MustacheTemplate": MustacheTemplate,
+    "ReorderList": ReorderList,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -390,4 +447,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MustacheVariables": "Mustache Variables",
     "MustacheVariableSampler": "Mustache Variable Sampler",
     "MustacheTemplate": "Mustache Template",
+    "ReorderList": "Reorder List",
 }
