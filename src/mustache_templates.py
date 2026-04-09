@@ -11,8 +11,9 @@ import yaml
 logger = logging.getLogger(__name__)
 
 MustacheVariablesDict = Dict[str, List[str]]
-_SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
+MustacheVariableList = List[Dict[str, str]]
 
+_SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
 _DEFAULT_VARIABLES_YAML = (
     "haircolor:\n"
     "  - brown\n"
@@ -110,67 +111,117 @@ def _render_template_with_mapping(template_text: str, mapping: Dict[str, str]) -
     return _MUSTACHE_VARIABLE_PATTERN.sub(lambda match: mapping[match.group(1).strip()], template_text)
 
 
-def sample_mustache_variables(
+def _variable_setting_for_index(
+    ordered_keys: Sequence[str],
+    value_sets: Sequence[Sequence[str]],
+    permutation_index: int,
+) -> Dict[str, str]:
+    index = permutation_index
+    chosen_values = [None] * len(value_sets)
+
+    for position in range(len(value_sets) - 1, -1, -1):
+        values = value_sets[position]
+        value_index = index % len(values)
+        index //= len(values)
+        chosen_values[position] = values[value_index]
+
+    return dict(zip(ordered_keys, chosen_values, strict=True))
+
+
+def sample_mustache_variable_list(
     variables: MustacheVariablesDict,
     *,
     sampling_mode: str = "sequential",
     seed: int = 0,
-) -> MustacheVariablesDict:
+    limit: int = -1,
+) -> MustacheVariableList:
     normalized_sampling_mode = _validate_sampling_method(sampling_mode)
-    sampled_variables: MustacheVariablesDict = {}
+    normalized_limit = _normalize_limit(limit)
     rng = random.Random(int(seed) & _SEED_MASK_64)
 
-    for key, values in variables.items():
+    ordered_keys = list(variables.keys())
+    if normalized_sampling_mode == "random":
+        rng.shuffle(ordered_keys)
+
+    if not ordered_keys:
+        sample_count = 1 if normalized_limit is None else min(normalized_limit, 1)
+        result = [{}] if sample_count == 1 else []
+        logger.debug(
+            "Sampled empty mustache variable set into %d variable settings with sampling_mode=%s seed=%d limit=%s.",
+            len(result),
+            normalized_sampling_mode,
+            int(seed) & _SEED_MASK_64,
+            "unbounded" if normalized_limit is None else normalized_limit,
+        )
+        return result
+
+    value_sets: List[List[str]] = []
+    for key in ordered_keys:
+        values = list(variables[key])
         if normalized_sampling_mode == "random":
-            sampled_variables[key] = rng.sample(values, k=len(values))
-        else:
-            sampled_variables[key] = list(values)
+            values = rng.sample(values, k=len(values))
+        value_sets.append(values)
+
+    total_permutations = _count_permutations(value_sets)
+    sample_count = total_permutations if normalized_limit is None else min(normalized_limit, total_permutations)
+
+    sampled_variables: MustacheVariableList = []
+    if normalized_sampling_mode == "random":
+        sampled_indices = rng.sample(range(total_permutations), sample_count)
+        sampled_variables = [
+            _variable_setting_for_index(ordered_keys, value_sets, permutation_index)
+            for permutation_index in sampled_indices
+        ]
+    else:
+        for combination in itertools.islice(itertools.product(*value_sets), sample_count):
+            sampled_variables.append(dict(zip(ordered_keys, combination, strict=True)))
 
     logger.debug(
-        "Sampled mustache variables using %s mode for %d keys with seed=%d.",
-        normalized_sampling_mode,
+        "Sampled %d/%d mustache variable settings using %s mode with seed=%d limit=%s.",
         len(sampled_variables),
+        total_permutations,
+        normalized_sampling_mode,
         int(seed) & _SEED_MASK_64,
+        "unbounded" if normalized_limit is None else normalized_limit,
     )
     return sampled_variables
 
 
-def render_mustache_permutations(
+def render_mustache_template_list(
     template: str,
-    variables: MustacheVariablesDict,
-    *,
-    limit: int = -1,
+    variable_list: MustacheVariableList,
 ) -> List[str]:
     template_text = str(template)
     referenced_variables = extract_template_variables(template_text)
-    normalized_limit = _normalize_limit(limit)
+
+    if not variable_list:
+        logger.debug("Mustache template received an empty variable list; returning no outputs.")
+        return []
 
     if not referenced_variables:
-        logger.debug("Mustache template contains no variables; returning the raw template as a single output.")
-        return [template_text]
-
-    missing = [name for name in referenced_variables if name not in variables]
-    if missing:
-        raise ValueError(
-            "Mustache template references undefined variables: "
-            + ", ".join(sorted(missing))
+        logger.debug(
+            "Mustache template contains no variables; repeating the raw template for %d variable settings.",
+            len(variable_list),
         )
-
-    value_sets: Sequence[Sequence[str]] = [variables[name] for name in referenced_variables]
-    total_permutations = _count_permutations(value_sets)
-    sample_count = total_permutations if normalized_limit is None else min(normalized_limit, total_permutations)
+        return [template_text for _ in variable_list]
 
     rendered_outputs: List[str] = []
-    for combination in itertools.islice(itertools.product(*value_sets), sample_count):
-        mapping = dict(zip(referenced_variables, combination, strict=True))
-        rendered_outputs.append(_render_template_with_mapping(template_text, mapping))
+    for setting_index, variables in enumerate(variable_list):
+        if not isinstance(variables, dict):
+            raise ValueError(
+                f"MUSTACHE_VARIABLE_LIST items must be dictionaries, got {type(variables).__name__} at index {setting_index}."
+            )
+        missing = [name for name in referenced_variables if name not in variables]
+        if missing:
+            raise ValueError(
+                f"Mustache template references undefined variables in entry {setting_index}: {', '.join(sorted(missing))}"
+            )
+        rendered_outputs.append(_render_template_with_mapping(template_text, variables))
 
     logger.debug(
-        "Rendered mustache template with %d referenced variables into %d/%d permutations (limit=%s).",
-        len(referenced_variables),
+        "Rendered mustache template for %d variable settings into %d strings.",
+        len(variable_list),
         len(rendered_outputs),
-        total_permutations,
-        "unbounded" if normalized_limit is None else normalized_limit,
     )
     return rendered_outputs
 
@@ -203,6 +254,66 @@ class MustacheVariables:
         return (variables,)
 
 
+class MustacheVariableSampler:
+    CATEGORY = "text/template"
+    RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
+    RETURN_NAMES = ("variables",)
+    FUNCTION = "sample"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "variables": ("MUSTACHE_VARIABLES", {
+                    "tooltip": "Mustache variables mapping to expand into concrete variable settings.",
+                }),
+                "sampling_mode": (_SAMPLING_METHODS, {
+                    "default": "sequential",
+                    "tooltip": (
+                        "How to generate concrete variable settings. 'sequential' walks the Cartesian product in "
+                        "stable order. 'random' randomizes key order, value order, and the sampled permutation order."
+                    ),
+                }),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": _SEED_MASK_64,
+                    "tooltip": (
+                        "64-bit seed used when sampling_mode is random. The same seed produces the same sampled "
+                        "variable-setting order."
+                    ),
+                }),
+                "limit": ("INT", {
+                    "default": -1,
+                    "min": -1,
+                    "max": 2147483647,
+                    "tooltip": (
+                        "Maximum number of concrete variable settings to emit. Use -1 to emit the full Cartesian product."
+                    ),
+                }),
+            },
+        }
+
+    def sample(self, variables: MustacheVariablesDict, sampling_mode: str, seed: int, limit: int):
+        if not isinstance(variables, dict):
+            raise ValueError(f"MUSTACHE_VARIABLES input must be a dictionary, got {type(variables).__name__}.")
+
+        sampled_variables = sample_mustache_variable_list(
+            variables,
+            sampling_mode=str(sampling_mode),
+            seed=int(seed),
+            limit=int(limit),
+        )
+        logger.debug(
+            "MustacheVariableSampler node emitted %d concrete variable settings with sampling_mode=%s seed=%d limit=%d.",
+            len(sampled_variables),
+            str(sampling_mode),
+            int(seed) & _SEED_MASK_64,
+            int(limit),
+        )
+        return (sampled_variables,)
+
+
 class MustacheTemplate:
     CATEGORY = "text/template"
     RETURN_TYPES = ("STRING",)
@@ -214,93 +325,30 @@ class MustacheTemplate:
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "variables": ("MUSTACHE_VARIABLES", {
+                "variables": ("MUSTACHE_VARIABLE_LIST", {
                     "tooltip": (
-                        "Mustache variables mapping generated by the Mustache Variables node. Each variable maps to "
-                        "one or more possible string values."
+                        "Concrete mustache variable settings generated by Mustache Variable Sampler. One rendered "
+                        "prompt is produced for each list entry."
                     ),
                 }),
                 "template": ("STRING", {
                     "default": _DEFAULT_TEMPLATE,
                     "multiline": True,
                     "tooltip": (
-                        "Template text containing placeholders like {{haircolor}}. The node renders every permutation "
-                        "of the referenced variable values and outputs the results as a STRING list."
-                    ),
-                }),
-                "limit": ("INT", {
-                    "default": -1,
-                    "min": -1,
-                    "max": 2147483647,
-                    "tooltip": (
-                        "Maximum number of rendered prompts to output. Use -1 to disable the cap. This protects "
-                        "against large Cartesian products."
+                        "Template text containing placeholders like {{haircolor}}. The node renders the template once "
+                        "for each variable-setting entry."
                     ),
                 }),
             },
         }
 
-    def render(self, variables: MustacheVariablesDict, template: str, limit: int):
-        if not isinstance(variables, dict):
-            raise ValueError(f"MUSTACHE_VARIABLES input must be a dictionary, got {type(variables).__name__}.")
+    def render(self, variables: MustacheVariableList, template: str):
+        if not isinstance(variables, list):
+            raise ValueError(f"MUSTACHE_VARIABLE_LIST input must be a list, got {type(variables).__name__}.")
 
-        rendered_outputs = render_mustache_permutations(
-            template,
-            variables,
-            limit=int(limit),
-        )
+        rendered_outputs = render_mustache_template_list(template, variables)
         logger.debug("MustacheTemplate node rendered %d outputs.", len(rendered_outputs))
         return (rendered_outputs,)
-
-
-class MustacheVariableSampler:
-    CATEGORY = "text/template"
-    RETURN_TYPES = ("MUSTACHE_VARIABLES",)
-    RETURN_NAMES = ("variables",)
-    FUNCTION = "sample"
-
-    @classmethod
-    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
-        return {
-            "required": {
-                "variables": ("MUSTACHE_VARIABLES", {
-                    "tooltip": "Mustache variables mapping to pass through or reorder before templating.",
-                }),
-                "sampling_mode": (_SAMPLING_METHODS, {
-                    "default": "sequential",
-                    "tooltip": (
-                        "How to order each variable's candidate values before expansion. 'sequential' preserves the "
-                        "original YAML order. 'random' shuffles each variable's value list."
-                    ),
-                }),
-                "seed": ("INT", {
-                    "default": 0,
-                    "min": 0,
-                    "max": _SEED_MASK_64,
-                    "tooltip": (
-                        "64-bit seed used when sampling_mode is random. The same seed produces the same shuffled "
-                        "variable ordering."
-                    ),
-                }),
-            },
-        }
-
-    def sample(self, variables: MustacheVariablesDict, sampling_mode: str, seed: int):
-        if not isinstance(variables, dict):
-            raise ValueError(f"MUSTACHE_VARIABLES input must be a dictionary, got {type(variables).__name__}.")
-
-        sampled_variables = sample_mustache_variables(
-            variables,
-            sampling_mode=str(sampling_mode),
-            seed=int(seed),
-        )
-        logger.debug(
-            "MustacheVariableSampler node emitted %d variables with sampling_mode=%s seed=%d.",
-            len(sampled_variables),
-            str(sampling_mode),
-            int(seed) & _SEED_MASK_64,
-        )
-        return (sampled_variables,)
 
 
 class JoinTextList:

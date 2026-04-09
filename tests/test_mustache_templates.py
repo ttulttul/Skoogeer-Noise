@@ -14,8 +14,8 @@ from src.mustache_templates import (  # noqa: E402
     MustacheVariables,
     extract_template_variables,
     parse_mustache_variables_yaml,
-    render_mustache_permutations,
-    sample_mustache_variables,
+    render_mustache_template_list,
+    sample_mustache_variable_list,
 )
 
 
@@ -55,85 +55,129 @@ def test_extract_template_variables_preserves_first_appearance_order():
     assert variables == ["haircolor", "leglength"]
 
 
-def test_render_mustache_permutations_generates_all_products_in_template_order():
-    rendered = render_mustache_permutations(
-        "The {{haircolor}} fox has {{leglength}} legs.",
+def test_sample_mustache_variable_list_generates_all_products_in_sequential_order():
+    sampled = sample_mustache_variable_list(
         {
             "haircolor": ["brown", "blonde"],
             "leglength": ["short", "long", "weird"],
             "unused": ["ignored"],
         },
+        sampling_mode="sequential",
     )
 
-    assert rendered == [
-        "The brown fox has short legs.",
-        "The brown fox has long legs.",
-        "The brown fox has weird legs.",
-        "The blonde fox has short legs.",
-        "The blonde fox has long legs.",
-        "The blonde fox has weird legs.",
+    assert sampled == [
+        {"haircolor": "brown", "leglength": "short", "unused": "ignored"},
+        {"haircolor": "brown", "leglength": "long", "unused": "ignored"},
+        {"haircolor": "brown", "leglength": "weird", "unused": "ignored"},
+        {"haircolor": "blonde", "leglength": "short", "unused": "ignored"},
+        {"haircolor": "blonde", "leglength": "long", "unused": "ignored"},
+        {"haircolor": "blonde", "leglength": "weird", "unused": "ignored"},
     ]
 
 
-def test_render_mustache_permutations_limit_truncates_sequential_order():
-    rendered = render_mustache_permutations(
-        "The {{haircolor}} fox has {{leglength}} legs.",
+def test_sample_mustache_variable_list_limit_truncates_at_sampler():
+    sampled = sample_mustache_variable_list(
         {
             "haircolor": ["brown", "blonde"],
             "leglength": ["short", "long", "weird"],
         },
+        sampling_mode="sequential",
         limit=4,
     )
 
-    assert rendered == [
-        "The brown fox has short legs.",
-        "The brown fox has long legs.",
-        "The brown fox has weird legs.",
-        "The blonde fox has short legs.",
+    assert sampled == [
+        {"haircolor": "brown", "leglength": "short"},
+        {"haircolor": "brown", "leglength": "long"},
+        {"haircolor": "brown", "leglength": "weird"},
+        {"haircolor": "blonde", "leglength": "short"},
     ]
 
 
-def test_render_mustache_permutations_raises_for_missing_variable():
-    with pytest.raises(ValueError, match="undefined variables: leglength"):
-        render_mustache_permutations(
-            "The {{haircolor}} fox has {{leglength}} legs.",
-            {"haircolor": ["brown"]},
-        )
-
-
-def test_render_mustache_permutations_without_placeholders_returns_template_once():
-    assert render_mustache_permutations("plain text", {"haircolor": ["brown"]}) == ["plain text"]
-
-
-def test_render_mustache_permutations_rejects_invalid_limit():
-    with pytest.raises(ValueError, match="limit must be >= -1"):
-        render_mustache_permutations(
-            "The {{haircolor}} fox.",
-            {"haircolor": ["brown"]},
-            limit=-2,
-        )
-
-
-def test_sample_mustache_variables_rejects_invalid_sampling_method():
-    with pytest.raises(ValueError, match="sampling_method must be one of"):
-        sample_mustache_variables(
-            {"haircolor": ["brown"]},
-            sampling_mode="chaotic",
-        )
-
-
-def test_sample_mustache_variables_random_is_deterministic_for_seed():
+def test_sample_mustache_variable_list_random_is_deterministic_for_seed():
     variables = {
         "haircolor": ["brown", "blonde", "black", "red"],
         "leglength": ["short", "long", "weird", "impossible"],
     }
 
-    first = sample_mustache_variables(variables, sampling_mode="random", seed=42)
-    second = sample_mustache_variables(variables, sampling_mode="random", seed=42)
-    third = sample_mustache_variables(variables, sampling_mode="random", seed=43)
+    first = sample_mustache_variable_list(variables, sampling_mode="random", seed=42, limit=5)
+    second = sample_mustache_variable_list(variables, sampling_mode="random", seed=42, limit=5)
+    third = sample_mustache_variable_list(variables, sampling_mode="random", seed=43, limit=5)
 
     assert first == second
     assert first != third
+
+
+def test_sample_mustache_variable_list_random_samples_full_permutations():
+    sampled = sample_mustache_variable_list(
+        {
+            "haircolor": ["brown", "blonde"],
+            "leglength": ["short", "long"],
+            "hat": ["cap", "none"],
+        },
+        sampling_mode="random",
+        seed=7,
+        limit=3,
+    )
+
+    assert len(sampled) == 3
+    assert len({tuple(item.items()) for item in sampled}) == 3
+    for item in sampled:
+        assert set(item.keys()) == {"haircolor", "leglength", "hat"}
+
+
+def test_sample_mustache_variable_list_empty_variables_returns_single_empty_setting():
+    assert sample_mustache_variable_list({}, limit=-1) == [{}]
+
+
+def test_sample_mustache_variable_list_rejects_invalid_limit():
+    with pytest.raises(ValueError, match="limit must be >= -1"):
+        sample_mustache_variable_list(
+            {"haircolor": ["brown"]},
+            limit=-2,
+        )
+
+
+def test_sample_mustache_variable_list_rejects_invalid_sampling_method():
+    with pytest.raises(ValueError, match="sampling_method must be one of"):
+        sample_mustache_variable_list(
+            {"haircolor": ["brown"]},
+            sampling_mode="chaotic",
+        )
+
+
+def test_render_mustache_template_list_renders_each_variable_setting():
+    rendered = render_mustache_template_list(
+        "The {{haircolor}} fox has {{leglength}} legs.",
+        [
+            {"haircolor": "brown", "leglength": "short"},
+            {"haircolor": "blonde", "leglength": "long"},
+        ],
+    )
+
+    assert rendered == [
+        "The brown fox has short legs.",
+        "The blonde fox has long legs.",
+    ]
+
+
+def test_render_mustache_template_list_repeats_plain_text_for_each_setting():
+    rendered = render_mustache_template_list(
+        "plain text",
+        [
+            {"haircolor": "brown"},
+            {"haircolor": "blonde"},
+        ],
+    )
+
+    assert rendered == ["plain text", "plain text"]
+
+
+def test_render_mustache_template_list_raises_for_missing_variable():
+    with pytest.raises(ValueError, match="undefined variables in entry 0: leglength"):
+        render_mustache_template_list(
+            "The {{haircolor}} fox has {{leglength}} legs.",
+            [{"haircolor": "brown"}],
+        )
 
 
 def test_mustache_variables_node_returns_typed_mapping():
@@ -144,13 +188,33 @@ def test_mustache_variables_node_returns_typed_mapping():
     assert variables == {"haircolor": ["brown", "blonde"]}
 
 
+def test_mustache_variable_sampler_returns_variable_list():
+    node = MustacheVariableSampler()
+
+    (variables,) = node.sample(
+        {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
+        "sequential",
+        0,
+        3,
+    )
+
+    assert variables == [
+        {"haircolor": "brown", "leglength": "short"},
+        {"haircolor": "brown", "leglength": "long"},
+        {"haircolor": "blonde", "leglength": "short"},
+    ]
+
+
 def test_mustache_template_node_returns_list_output():
     node = MustacheTemplate()
 
     (rendered,) = node.render(
-        {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
+        [
+            {"haircolor": "brown", "leglength": "short"},
+            {"haircolor": "brown", "leglength": "long"},
+            {"haircolor": "blonde", "leglength": "short"},
+        ],
         "The {{haircolor}} fox has {{leglength}} legs.",
-        -1,
     )
 
     assert node.OUTPUT_IS_LIST == (True,)
@@ -158,7 +222,6 @@ def test_mustache_template_node_returns_list_output():
         "The brown fox has short legs.",
         "The brown fox has long legs.",
         "The blonde fox has short legs.",
-        "The blonde fox has long legs.",
     ]
 
 
@@ -178,65 +241,6 @@ def test_join_text_list_joins_all_items_for_preview():
         "The blonde fox has short legs."
     )
     assert count == 3
-
-
-def test_mustache_variable_sampler_sequential_returns_variables():
-    node = MustacheVariableSampler()
-
-    (variables,) = node.sample(
-        {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
-        "sequential",
-        0,
-    )
-
-    assert variables == {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]}
-
-
-def test_mustache_variable_sampler_random_reorders_values_deterministically():
-    node = MustacheVariableSampler()
-    inputs = {"haircolor": ["brown", "blonde"], "leglength": ["short", "long", "weird"]}
-    (first,) = node.sample(
-        inputs,
-        "random",
-        123,
-    )
-    (second,) = node.sample(
-        inputs,
-        "random",
-        123,
-    )
-    (third,) = node.sample(
-        inputs,
-        "random",
-        124,
-    )
-
-    assert first == second
-    assert third != first
-    assert sorted(first["haircolor"]) == sorted(inputs["haircolor"])
-    assert sorted(first["leglength"]) == sorted(inputs["leglength"])
-
-
-def test_mustache_variable_sampler_randomized_variables_affect_template_order():
-    sampler = MustacheVariableSampler()
-    template = MustacheTemplate()
-
-    (sampled_variables,) = sampler.sample(
-        {"haircolor": ["brown", "blonde"], "leglength": ["short", "long"]},
-        "random",
-        7,
-    )
-    (rendered,) = template.render(
-        sampled_variables,
-        "The {{haircolor}} fox has {{leglength}} legs.",
-        3,
-    )
-
-    assert rendered == [
-        "The blonde fox has long legs.",
-        "The blonde fox has short legs.",
-        "The brown fox has long legs.",
-    ]
 
 
 def test_parse_mustache_variables_yaml_rejects_nested_values():
