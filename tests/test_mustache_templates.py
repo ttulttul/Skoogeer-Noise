@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.mustache_templates import (  # noqa: E402
     ConcatenateLists,
     JoinTextList,
+    MergeMustacheVariableLists,
     MustacheTemplate,
     MustacheVariableSampler,
     MustacheVariables,
@@ -469,6 +470,65 @@ def test_concatenate_lists_joins_mustache_variable_list_batches():
         {"animal": "wolf", "lens": "50mm"},
         {"animal": "cat", "lens": "85mm"},
     ]
+
+
+def test_merge_mustache_variable_lists_merges_entries_by_index():
+    node = MergeMustacheVariableLists()
+
+    (items,) = node.merge(
+        [
+            {"camera_lens": "85mm", "lighting_style": "gritty neon glow"},
+            {"camera_lens": "35mm", "lighting_style": "soft overcast"},
+        ],
+        [
+            {"person_masc": "40-year-old burly Black man, a mechanic", "outfit_masc": "grime-covered charcoal flannel polo"},
+            {"person_masc": "22-year-old slim East Asian man, a student", "outfit_masc": "clean white tank top"},
+        ],
+    )
+
+    assert items == [
+        {
+            "camera_lens": "85mm",
+            "lighting_style": "gritty neon glow",
+            "person_masc": "40-year-old burly Black man, a mechanic",
+            "outfit_masc": "grime-covered charcoal flannel polo",
+        },
+        {
+            "camera_lens": "35mm",
+            "lighting_style": "soft overcast",
+            "person_masc": "22-year-old slim East Asian man, a student",
+            "outfit_masc": "clean white tank top",
+        },
+    ]
+
+
+def test_merge_mustache_variable_lists_broadcasts_singleton_side():
+    node = MergeMustacheVariableLists()
+
+    (items,) = node.merge(
+        [
+            {"camera_lens": "85mm"},
+            {"camera_lens": "35mm"},
+        ],
+        [
+            {"quality_boosters": "masterpiece, photorealistic"},
+        ],
+    )
+
+    assert items == [
+        {"camera_lens": "85mm", "quality_boosters": "masterpiece, photorealistic"},
+        {"camera_lens": "35mm", "quality_boosters": "masterpiece, photorealistic"},
+    ]
+
+
+def test_merge_mustache_variable_lists_rejects_incompatible_lengths():
+    node = MergeMustacheVariableLists()
+
+    with pytest.raises(ValueError, match="different lengths unless one side has exactly one entry"):
+        node.merge(
+            [{"a": "1"}, {"a": "2"}],
+            [{"b": "x"}, {"b": "y"}, {"b": "z"}],
+        )
 
 
 def test_parse_mustache_variables_yaml_rejects_nested_values():

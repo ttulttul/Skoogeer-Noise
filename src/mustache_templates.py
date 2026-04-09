@@ -149,6 +149,46 @@ def _normalize_mustache_variable_list_input(variables) -> MustacheVariableList |
     return flattened
 
 
+def merge_mustache_variable_lists(
+    variables_1,
+    variables_2,
+) -> MustacheVariableList:
+    left = _normalize_mustache_variable_list_input(variables_1)
+    right = _normalize_mustache_variable_list_input(variables_2)
+
+    left = [] if left is None else left
+    right = [] if right is None else right
+
+    if not left:
+        return [dict(item) for item in right]
+    if not right:
+        return [dict(item) for item in left]
+
+    if len(left) == len(right):
+        pairs = zip(left, right, strict=True)
+    elif len(left) == 1:
+        pairs = ((left[0], item) for item in right)
+    elif len(right) == 1:
+        pairs = ((item, right[0]) for item in left)
+    else:
+        raise ValueError(
+            "Cannot merge MUSTACHE_VARIABLE_LIST inputs with different lengths unless one side has exactly one entry, "
+            f"got {len(left)} and {len(right)}."
+        )
+
+    merged: MustacheVariableList = []
+    for left_item, right_item in pairs:
+        merged.append({**left_item, **right_item})
+
+    logger.debug(
+        "Merged MUSTACHE_VARIABLE_LIST inputs of lengths %d and %d into %d entries.",
+        len(left),
+        len(right),
+        len(merged),
+    )
+    return merged
+
+
 def render_mustache_yaml_inputs(
     yaml_inputs: Sequence[str] | str,
     variables: MustacheVariableList | None,
@@ -626,9 +666,33 @@ class ConcatenateLists:
         return (combined,)
 
 
+class MergeMustacheVariableLists:
+    CATEGORY = "text/template"
+    RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
+    RETURN_NAMES = ("items",)
+    FUNCTION = "merge"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "items_1": ("MUSTACHE_VARIABLE_LIST", {
+                    "tooltip": "First mustache variable-setting list to merge.",
+                }),
+                "items_2": ("MUSTACHE_VARIABLE_LIST", {
+                    "tooltip": "Second mustache variable-setting list to merge into items_1.",
+                }),
+            },
+        }
+
+    def merge(self, items_1, items_2):
+        return (merge_mustache_variable_lists(items_1, items_2),)
+
+
 NODE_CLASS_MAPPINGS = {
     "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
+    "MergeMustacheVariableLists": MergeMustacheVariableLists,
     "MustacheVariables": MustacheVariables,
     "MustacheVariableSampler": MustacheVariableSampler,
     "MustacheTemplate": MustacheTemplate,
@@ -638,6 +702,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
+    "MergeMustacheVariableLists": "Merge Mustache Variable Lists",
     "MustacheVariables": "Mustache Variables",
     "MustacheVariableSampler": "Mustache Variable Sampler",
     "MustacheTemplate": "Mustache Template",

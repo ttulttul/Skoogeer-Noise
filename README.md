@@ -151,6 +151,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
 | [Join Text List](#join-text-list) | `text/debug` | `STRING`, `INT` |
+| [Merge Mustache Variable Lists](#merge-mustache-variable-lists) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Concatenate Lists](#concatenate-lists) | `utils/list` | list |
 | [Reorder List](#reorder-list) | `utils/list` | list |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
@@ -528,6 +529,35 @@ Mustache Template -> Join Text List -> Preview as Text
 
 ---
 
+#### Merge Mustache Variable Lists
+
+Merges two `MUSTACHE_VARIABLE_LIST` inputs entry-by-entry so each output entry contains the union of keys from both sides. This is the node to use when one branch produces fields like `camera_lens` and another produces fields like `person_masc`, and your downstream template needs both in the same rendered entry.
+
+- **Menu category:** `text/template`
+- **Returns:** `MUSTACHE_VARIABLE_LIST`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `items_1` | `MUSTACHE_VARIABLE_LIST` | – | – | First variable-setting list. |
+| `items_2` | `MUSTACHE_VARIABLE_LIST` | – | – | Second variable-setting list. Keys from this side overwrite duplicate keys from `items_1`. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `items` | `MUSTACHE_VARIABLE_LIST` | Entry-by-entry merged variable-setting list. |
+
+##### Notes
+
+- If both inputs have the same length, entries are merged by index.
+- If one side has exactly one entry, that singleton entry is broadcast across the other side.
+- If both sides have different lengths greater than one, the node raises an error.
+- Use this instead of `Concatenate Lists` when downstream templates need one entry that contains keys from both branches.
+
+---
+
 #### Reorder List
 
 Reorders a list-valued input without changing the item type. This is a generic utility node that can reverse any list or apply a seeded shuffle.
@@ -558,7 +588,7 @@ Reorders a list-valued input without changing the item type. This is a generic u
 
 #### Concatenate Lists
 
-Concatenates two list-valued inputs into one list without changing the item type. This is useful for combining multiple `MUSTACHE_VARIABLE_LIST` branches before sending them into `Mustache Template`.
+Concatenates two list-valued inputs into one list without changing the item type. This is useful when you want to append batches, not when you need to combine per-entry dictionaries.
 
 - **Menu category:** `utils/list`
 - **Returns:** list of the same item type
@@ -580,6 +610,7 @@ Concatenates two list-valued inputs into one list without changing the item type
 
 - This node is generic and works with `MUSTACHE_VARIABLE_LIST`, `STRING` lists, and other list-valued sockets.
 - For the mustache workflow, the list-valued node is `Mustache Variable Sampler`; `Mustache Variables` itself still returns a `MUSTACHE_VARIABLES` mapping.
+- For mustache workflows, use `Merge Mustache Variable Lists` instead when a downstream template needs each output entry to include keys from both input branches.
 
 ---
 
