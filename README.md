@@ -401,7 +401,7 @@ Parses a YAML mapping of variable names to candidate values and packages it as a
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `yaml_text` | `STRING` | sample YAML | multiline | YAML mapping of variable names to values. Lists are the normal form; scalar values are accepted as shorthand and are wrapped into a one-item list. Each final value is coerced to text before rendering. |
+| `yaml_text` | `STRING` or `STRING` list | sample YAML | multiline | YAML mapping of variable names to values. Lists are the normal form; scalar values are accepted as shorthand and are wrapped into a one-item list. Each final value is coerced to text before rendering. When a list of YAML strings is provided, all mappings are merged together. |
 
 ##### Example YAML
 
@@ -420,6 +420,8 @@ leglength:
 - YAML must parse to a mapping at the top level.
 - Nested objects and nested lists inside variable values are rejected.
 - Empty input returns an empty variable set.
+- When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
+- This makes it possible to feed a list-valued `STRING` output, such as templated YAML generated upstream, back into `Mustache Variables`.
 
 ---
 

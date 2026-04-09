@@ -14,6 +14,7 @@ from src.mustache_templates import (  # noqa: E402
     MustacheVariables,
     ReorderList,
     extract_template_variables,
+    parse_mustache_variables_inputs,
     parse_mustache_variables_yaml,
     render_mustache_template_list,
     sample_mustache_variable_list,
@@ -45,6 +46,19 @@ def test_parse_mustache_variables_yaml_wraps_scalar_values():
     assert variables == {
         "haircolor": ["brown"],
         "count": ["3"],
+    }
+
+
+def test_parse_mustache_variables_inputs_merges_multiple_yaml_strings():
+    variables = parse_mustache_variables_inputs([
+        "haircolor:\n  - brown\n  - blonde\n",
+        "leglength:\n  - short\n  - long\n",
+        "haircolor:\n  - black\n",
+    ])
+
+    assert variables == {
+        "haircolor": ["brown", "blonde", "black"],
+        "leglength": ["short", "long"],
     }
 
 
@@ -186,7 +200,23 @@ def test_mustache_variables_node_returns_typed_mapping():
 
     (variables,) = node.parse_variables("haircolor:\n  - brown\n  - blonde\n")
 
+    assert node.INPUT_IS_LIST is True
     assert variables == {"haircolor": ["brown", "blonde"]}
+
+
+def test_mustache_variables_node_accepts_list_of_yaml_strings():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables([
+        "haircolor:\n  - brown\n",
+        "haircolor:\n  - blonde\n",
+        "leglength:\n  - short\n  - long\n",
+    ])
+
+    assert variables == {
+        "haircolor": ["brown", "blonde"],
+        "leglength": ["short", "long"],
+    }
 
 
 def test_mustache_variable_sampler_returns_variable_list():

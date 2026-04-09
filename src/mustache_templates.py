@@ -76,6 +76,30 @@ def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
     return variables
 
 
+def parse_mustache_variables_inputs(yaml_inputs: Sequence[str] | str) -> MustacheVariablesDict:
+    if isinstance(yaml_inputs, str):
+        inputs = [yaml_inputs]
+    else:
+        inputs = [str(item) for item in yaml_inputs]
+
+    merged_variables: MustacheVariablesDict = {}
+    for input_index, yaml_text in enumerate(inputs):
+        parsed_variables = parse_mustache_variables_yaml(yaml_text)
+        for key, values in parsed_variables.items():
+            if key not in merged_variables:
+                merged_variables[key] = list(values)
+            else:
+                merged_variables[key].extend(values)
+        logger.debug(
+            "Merged mustache variables input %d with %d keys into aggregate key count %d.",
+            input_index,
+            len(parsed_variables),
+            len(merged_variables),
+        )
+
+    return merged_variables
+
+
 def extract_template_variables(template: str) -> List[str]:
     ordered_variables: List[str] = []
     seen = set()
@@ -238,6 +262,7 @@ class MustacheVariables:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLES",)
     RETURN_NAMES = ("variables",)
+    INPUT_IS_LIST = True
     FUNCTION = "parse_variables"
 
     @classmethod
@@ -256,8 +281,8 @@ class MustacheVariables:
             },
         }
 
-    def parse_variables(self, yaml_text: str):
-        variables = parse_mustache_variables_yaml(yaml_text)
+    def parse_variables(self, yaml_text):
+        variables = parse_mustache_variables_inputs(yaml_text)
         logger.debug("MustacheVariables node produced %d variable groups.", len(variables))
         return (variables,)
 
