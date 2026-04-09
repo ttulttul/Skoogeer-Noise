@@ -28,6 +28,7 @@ _MUSTACHE_VARIABLE_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
 _SAMPLING_METHODS = ("sequential", "random")
 _REORDER_MODES = ("shuffle", "reverse")
 _MAX_UNBOUNDED_VARIABLE_SETTINGS = 100_000
+_YAML_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
 def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
@@ -86,7 +87,7 @@ def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
         return {}
 
     try:
-        parsed = yaml.safe_load(text)
+        parsed = yaml.load(text, Loader=_YAML_SAFE_LOADER)
     except yaml.YAMLError as exc:
         raise ValueError(f"Failed to parse Mustache variables YAML: {exc}") from exc
 
@@ -207,28 +208,54 @@ def render_mustache_yaml_inputs(
     return rendered_inputs
 
 
-def _compile_mustache_template(template_text: str) -> tuple[List[str], List[str], List[str]]:
-    literal_segments: List[str] = []
-    placeholder_names: List[str] = []
+class _FormatMapView:
+    __slots__ = ("variables", "field_name_to_variable")
+
+    def __init__(self, variables: Dict[str, str], field_name_to_variable: Dict[str, str]):
+        self.variables = variables
+        self.field_name_to_variable = field_name_to_variable
+
+    def __getitem__(self, field_name: str) -> str:
+        return self.variables[self.field_name_to_variable.get(field_name, field_name)]
+
+
+def _escape_format_literal(text: str) -> str:
+    return text.replace("{", "{{").replace("}", "}}")
+
+
+def _can_use_direct_format_field(variable_name: str) -> bool:
+    return variable_name.isidentifier()
+
+
+def _compile_mustache_template(template_text: str) -> tuple[str, List[str], Dict[str, str]]:
+    format_parts: List[str] = []
     referenced_variables: List[str] = []
-    seen_variables: set[str] = set()
+    field_name_to_variable: Dict[str, str] = {}
+    field_name_by_variable: Dict[str, str] = {}
     last_index = 0
 
     for match in _MUSTACHE_VARIABLE_PATTERN.finditer(template_text):
-        literal_segments.append(template_text[last_index:match.start()])
+        format_parts.append(_escape_format_literal(template_text[last_index:match.start()]))
         variable_name = match.group(1).strip()
-        placeholder_names.append(variable_name)
-        if variable_name and variable_name not in seen_variables:
+        if variable_name not in field_name_by_variable:
+            if _can_use_direct_format_field(variable_name):
+                field_name = variable_name
+            else:
+                field_name = f"mustache_{len(field_name_to_variable)}"
+                field_name_to_variable[field_name] = variable_name
+            field_name_by_variable[variable_name] = field_name
             referenced_variables.append(variable_name)
-            seen_variables.add(variable_name)
+        format_parts.append("{")
+        format_parts.append(field_name_by_variable[variable_name])
+        format_parts.append("}")
         last_index = match.end()
 
-    literal_segments.append(template_text[last_index:])
-    return literal_segments, placeholder_names, referenced_variables
+    format_parts.append(_escape_format_literal(template_text[last_index:]))
+    return "".join(format_parts), referenced_variables, field_name_to_variable
 
 
 def extract_template_variables(template: str) -> List[str]:
-    _, _, referenced_variables = _compile_mustache_template(str(template))
+    _, referenced_variables, _ = _compile_mustache_template(str(template))
     return referenced_variables
 
 
@@ -273,15 +300,13 @@ def _resolve_sample_count(total_permutations: int, normalized_limit: int | None,
     return min(normalized_limit, total_permutations)
 
 def _render_compiled_template(
-    literal_segments: Sequence[str],
-    placeholder_names: Sequence[str],
+    compiled_format: str,
+    field_name_to_variable: Dict[str, str],
     mapping: Dict[str, str],
 ) -> str:
-    rendered_parts = [literal_segments[0]]
-    for segment_index, placeholder_name in enumerate(placeholder_names, start=1):
-        rendered_parts.append(mapping[placeholder_name])
-        rendered_parts.append(literal_segments[segment_index])
-    return "".join(rendered_parts)
+    if not field_name_to_variable:
+        return compiled_format.format_map(mapping)
+    return compiled_format.format_map(_FormatMapView(mapping, field_name_to_variable))
 
 
 def _decode_text_separator(separator: str) -> str:
@@ -402,13 +427,13 @@ def render_mustache_template_list(
     variable_list: MustacheVariableList,
 ) -> List[str]:
     template_text = str(template)
-    literal_segments, placeholder_names, referenced_variables = _compile_mustache_template(template_text)
+    compiled_format, referenced_variables, field_name_to_variable = _compile_mustache_template(template_text)
 
     if not variable_list:
         logger.debug("Mustache template received an empty variable list; returning no outputs.")
         return []
 
-    if not placeholder_names:
+    if not referenced_variables:
         logger.debug(
             "Mustache template contains no variables; repeating the raw template for %d variable settings.",
             len(variable_list),
@@ -422,7 +447,9 @@ def render_mustache_template_list(
                 f"MUSTACHE_VARIABLE_LIST items must be dictionaries, got {type(variables).__name__} at index {setting_index}."
             )
         try:
-            rendered_outputs.append(_render_compiled_template(literal_segments, placeholder_names, variables))
+            rendered_outputs.append(
+                _render_compiled_template(compiled_format, field_name_to_variable, variables)
+            )
         except KeyError:
             missing = [name for name in referenced_variables if name not in variables]
             raise ValueError(

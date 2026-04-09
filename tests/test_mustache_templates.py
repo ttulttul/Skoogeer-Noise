@@ -249,6 +249,28 @@ def test_render_mustache_template_list_renders_repeated_placeholders():
     ]
 
 
+def test_render_mustache_template_list_preserves_literal_braces():
+    rendered = render_mustache_template_list(
+        "literal {curly} braces and {{subject}}",
+        [
+            {"subject": "fox"},
+        ],
+    )
+
+    assert rendered == ["literal {curly} braces and fox"]
+
+
+def test_render_mustache_template_list_supports_variable_names_with_spaces():
+    rendered = render_mustache_template_list(
+        "Lens: {{camera lens}}",
+        [
+            {"camera lens": "35mm"},
+        ],
+    )
+
+    assert rendered == ["Lens: 35mm"]
+
+
 def test_render_mustache_template_list_repeats_plain_text_for_each_setting():
     rendered = render_mustache_template_list(
         "plain text",
