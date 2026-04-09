@@ -297,6 +297,31 @@ def test_mustache_variables_node_renders_yaml_against_variable_list_input():
     }
 
 
+def test_mustache_variables_node_accepts_nested_variable_list_wrappers():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables(
+        "subject_identity:\n"
+        "  - {{animal}}\n"
+        "camera_lens:\n"
+        "  - {{lens}}\n",
+        [
+            [
+                {"animal": "fox", "lens": "35mm"},
+                {"animal": "wolf", "lens": "50mm"},
+            ],
+            [
+                {"animal": "cat", "lens": "85mm"},
+            ],
+        ],
+    )
+
+    assert variables == {
+        "subject_identity": ["fox", "wolf", "cat"],
+        "camera_lens": ["35mm", "50mm", "85mm"],
+    }
+
+
 def test_second_stage_mustache_variables_workflow_uses_upstream_variable_settings():
     first_stage_variables = {
         "animal": ["fox", "wolf"],

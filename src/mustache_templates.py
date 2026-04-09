@@ -125,19 +125,28 @@ def parse_mustache_variables_inputs(yaml_inputs: Sequence[str] | str) -> Mustach
     return merged_variables
 
 
-def _normalize_mustache_variable_list_input(variables) -> MustacheVariableList | None:
-    if variables is None:
-        return None
+def _flatten_mustache_variable_list_input(variables, flattened: MustacheVariableList) -> None:
+    if isinstance(variables, dict):
+        flattened.append(variables)
+        return
+
     if isinstance(variables, list):
-        if len(variables) == 0:
-            return []
-        if all(isinstance(item, dict) for item in variables):
-            return variables
-        if len(variables) == 1 and isinstance(variables[0], list) and all(isinstance(item, dict) for item in variables[0]):
-            return variables[0]
+        for item in variables:
+            _flatten_mustache_variable_list_input(item, flattened)
+        return
+
     raise ValueError(
         "MUSTACHE_VARIABLE_LIST input must be a list of dictionaries containing string values."
     )
+
+
+def _normalize_mustache_variable_list_input(variables) -> MustacheVariableList | None:
+    if variables is None:
+        return None
+
+    flattened: MustacheVariableList = []
+    _flatten_mustache_variable_list_input(variables, flattened)
+    return flattened
 
 
 def render_mustache_yaml_inputs(
