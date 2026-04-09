@@ -496,6 +496,7 @@ The man has blonde hair and weird legs.
 - Variables present in a `MUSTACHE_VARIABLE_LIST` entry but not referenced in the template are ignored.
 - Templates with no placeholders are repeated once for each entry in the variable list.
 - Referencing a missing variable raises an error instead of silently leaving `{{name}}` in place.
+- The renderer tokenizes the template once per node execution and reuses those parsed segments across the whole batch, which reduces CPU overhead when rendering large prompt lists.
 - ComfyUI's built-in `Preview as Text` typically only shows the first item from a list-valued `STRING` output. Use `Join Text List` before previewing if you want to inspect the whole rendered batch.
 
 ---

@@ -207,15 +207,29 @@ def render_mustache_yaml_inputs(
     return rendered_inputs
 
 
+def _compile_mustache_template(template_text: str) -> tuple[List[str], List[str], List[str]]:
+    literal_segments: List[str] = []
+    placeholder_names: List[str] = []
+    referenced_variables: List[str] = []
+    seen_variables: set[str] = set()
+    last_index = 0
+
+    for match in _MUSTACHE_VARIABLE_PATTERN.finditer(template_text):
+        literal_segments.append(template_text[last_index:match.start()])
+        variable_name = match.group(1).strip()
+        placeholder_names.append(variable_name)
+        if variable_name and variable_name not in seen_variables:
+            referenced_variables.append(variable_name)
+            seen_variables.add(variable_name)
+        last_index = match.end()
+
+    literal_segments.append(template_text[last_index:])
+    return literal_segments, placeholder_names, referenced_variables
+
+
 def extract_template_variables(template: str) -> List[str]:
-    ordered_variables: List[str] = []
-    seen = set()
-    for match in _MUSTACHE_VARIABLE_PATTERN.finditer(template):
-        name = match.group(1).strip()
-        if name and name not in seen:
-            ordered_variables.append(name)
-            seen.add(name)
-    return ordered_variables
+    _, _, referenced_variables = _compile_mustache_template(str(template))
+    return referenced_variables
 
 
 def _validate_sampling_method(sampling_method: str) -> str:
@@ -258,9 +272,16 @@ def _resolve_sample_count(total_permutations: int, normalized_limit: int | None,
 
     return min(normalized_limit, total_permutations)
 
-
-def _render_template_with_mapping(template_text: str, mapping: Dict[str, str]) -> str:
-    return _MUSTACHE_VARIABLE_PATTERN.sub(lambda match: mapping[match.group(1).strip()], template_text)
+def _render_compiled_template(
+    literal_segments: Sequence[str],
+    placeholder_names: Sequence[str],
+    mapping: Dict[str, str],
+) -> str:
+    rendered_parts = [literal_segments[0]]
+    for segment_index, placeholder_name in enumerate(placeholder_names, start=1):
+        rendered_parts.append(mapping[placeholder_name])
+        rendered_parts.append(literal_segments[segment_index])
+    return "".join(rendered_parts)
 
 
 def _decode_text_separator(separator: str) -> str:
@@ -381,13 +402,13 @@ def render_mustache_template_list(
     variable_list: MustacheVariableList,
 ) -> List[str]:
     template_text = str(template)
-    referenced_variables = extract_template_variables(template_text)
+    literal_segments, placeholder_names, referenced_variables = _compile_mustache_template(template_text)
 
     if not variable_list:
         logger.debug("Mustache template received an empty variable list; returning no outputs.")
         return []
 
-    if not referenced_variables:
+    if not placeholder_names:
         logger.debug(
             "Mustache template contains no variables; repeating the raw template for %d variable settings.",
             len(variable_list),
@@ -400,12 +421,13 @@ def render_mustache_template_list(
             raise ValueError(
                 f"MUSTACHE_VARIABLE_LIST items must be dictionaries, got {type(variables).__name__} at index {setting_index}."
             )
-        missing = [name for name in referenced_variables if name not in variables]
-        if missing:
+        try:
+            rendered_outputs.append(_render_compiled_template(literal_segments, placeholder_names, variables))
+        except KeyError:
+            missing = [name for name in referenced_variables if name not in variables]
             raise ValueError(
                 f"Mustache template references undefined variables in entry {setting_index}: {', '.join(sorted(missing))}"
             )
-        rendered_outputs.append(_render_template_with_mapping(template_text, variables))
 
     logger.debug(
         "Rendered mustache template for %d variable settings into %d strings.",

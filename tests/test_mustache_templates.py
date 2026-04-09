@@ -234,6 +234,21 @@ def test_render_mustache_template_list_renders_each_variable_setting():
     ]
 
 
+def test_render_mustache_template_list_renders_repeated_placeholders():
+    rendered = render_mustache_template_list(
+        "{{subject}} with {{subject}} energy",
+        [
+            {"subject": "fox"},
+            {"subject": "wolf"},
+        ],
+    )
+
+    assert rendered == [
+        "fox with fox energy",
+        "wolf with wolf energy",
+    ]
+
+
 def test_render_mustache_template_list_repeats_plain_text_for_each_setting():
     rendered = render_mustache_template_list(
         "plain text",
