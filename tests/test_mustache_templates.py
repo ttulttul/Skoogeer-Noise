@@ -424,6 +424,18 @@ def test_join_text_list_accepts_custom_escaped_separator():
     assert count == 3
 
 
+def test_join_text_list_unwraps_singleton_list_separator_values():
+    node = JoinTextList()
+
+    joined, count = node.join_text([
+        "text entry 1",
+        "text entry 2",
+    ], ["\\n===\\n"])
+
+    assert joined == "text entry 1\n===\ntext entry 2"
+    assert count == 2
+
+
 def test_reorder_list_reverse_returns_reversed_items():
     node = ReorderList()
 

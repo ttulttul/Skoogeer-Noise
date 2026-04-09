@@ -521,6 +521,10 @@ Consumes a list-valued `STRING` input and joins every item into one string so pr
 | `text` | `STRING` | All list items joined with the requested separator. |
 | `count` | `INT` | Number of input strings that were joined. |
 
+##### Notes
+
+- The node unwraps singleton-list widget values for `separator`, which matches how ComfyUI sometimes passes control inputs into list-aware nodes.
+
 ##### Typical usage
 
 ```text

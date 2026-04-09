@@ -272,6 +272,12 @@ def _decode_text_separator(separator: str) -> str:
     )
 
 
+def _unwrap_singleton_list(value):
+    if isinstance(value, list) and len(value) == 1:
+        return value[0]
+    return value
+
+
 def _variable_setting_for_index(
     ordered_keys: Sequence[str],
     value_sets: Sequence[Sequence[str]],
@@ -575,7 +581,7 @@ class JoinTextList:
         }
 
     def join_text(self, text, separator):
-        decoded_separator = _decode_text_separator(separator)
+        decoded_separator = _decode_text_separator(_unwrap_singleton_list(separator))
         joined = decoded_separator.join(str(item) for item in text)
         count = len(text)
         logger.debug(
