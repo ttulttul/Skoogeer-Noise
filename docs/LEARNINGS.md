@@ -27,3 +27,4 @@
 - On `INPUT_IS_LIST` nodes, ComfyUI passes widget inputs like enums and integers as singleton lists too, so generic list-processing nodes need to unwrap those control values before using them.
 - Making `Mustache Variables` list-aware is a clean way to support higher-order templating: a list of rendered YAML fragments can be merged into one `MUSTACHE_VARIABLES` mapping by appending repeated keys in input order.
 - In practice, templated YAML fragments may parse as a YAML list of mappings rather than a single mapping, so `Mustache Variables` needs to normalize both top-level shapes to avoid brittle chaining behavior.
+- Chaining `Mustache Variables` stages needs a dedicated `MUSTACHE_VARIABLE_LIST` input for the second stage. Feeding concrete variable-setting dicts into `yaml_text` cannot express "render this YAML with those settings"; the node has to keep the YAML template local and accept the upstream settings separately.

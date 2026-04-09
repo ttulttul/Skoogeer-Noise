@@ -124,6 +124,39 @@ def parse_mustache_variables_inputs(yaml_inputs: Sequence[str] | str) -> Mustach
     return merged_variables
 
 
+def _normalize_mustache_variable_list_input(variables) -> MustacheVariableList | None:
+    if variables is None:
+        return None
+    if isinstance(variables, list):
+        if len(variables) == 0:
+            return []
+        if all(isinstance(item, dict) for item in variables):
+            return variables
+        if len(variables) == 1 and isinstance(variables[0], list) and all(isinstance(item, dict) for item in variables[0]):
+            return variables[0]
+    raise ValueError(
+        "MUSTACHE_VARIABLE_LIST input must be a list of dictionaries containing string values."
+    )
+
+
+def render_mustache_yaml_inputs(
+    yaml_inputs: Sequence[str] | str,
+    variables: MustacheVariableList | None,
+) -> List[str]:
+    if isinstance(yaml_inputs, str):
+        inputs = [yaml_inputs]
+    else:
+        inputs = [str(item) for item in yaml_inputs]
+
+    if variables is None:
+        return inputs
+
+    rendered_inputs: List[str] = []
+    for yaml_text in inputs:
+        rendered_inputs.extend(render_mustache_template_list(yaml_text, variables))
+    return rendered_inputs
+
+
 def extract_template_variables(template: str) -> List[str]:
     ordered_variables: List[str] = []
     seen = set()
@@ -299,14 +332,25 @@ class MustacheVariables:
                     "tooltip": (
                         "YAML mapping of variable names to values. Each key becomes a mustache variable and each "
                         "value should usually be a list of render options. Scalar values are accepted as shorthand "
-                        "for a single-item list."
+                        "for a single-item list. If the optional variables input is connected, this YAML is treated "
+                        "as a mustache template and rendered once per variable-setting entry before parsing."
+                    ),
+                }),
+            },
+            "optional": {
+                "variables": ("MUSTACHE_VARIABLE_LIST", {
+                    "tooltip": (
+                        "Optional concrete variable settings used to render templated YAML before parsing. This lets "
+                        "you chain one mustache-variable stage into another."
                     ),
                 }),
             },
         }
 
-    def parse_variables(self, yaml_text):
-        variables = parse_mustache_variables_inputs(yaml_text)
+    def parse_variables(self, yaml_text, variables=None):
+        variable_list = _normalize_mustache_variable_list_input(variables)
+        rendered_yaml_inputs = render_mustache_yaml_inputs(yaml_text, variable_list)
+        variables = parse_mustache_variables_inputs(rendered_yaml_inputs)
         logger.debug("MustacheVariables node produced %d variable groups.", len(variables))
         return (variables,)
 

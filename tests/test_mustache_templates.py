@@ -242,6 +242,59 @@ def test_mustache_variables_node_accepts_list_of_yaml_strings():
     }
 
 
+def test_mustache_variables_node_renders_yaml_against_variable_list_input():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables(
+        "subject_identity:\n"
+        "  - {{animal}}\n"
+        "camera_lens:\n"
+        "  - {{lens}}\n",
+        [
+            {"animal": "fox", "lens": "35mm"},
+            {"animal": "wolf", "lens": "85mm"},
+        ],
+    )
+
+    assert variables == {
+        "subject_identity": ["fox", "wolf"],
+        "camera_lens": ["35mm", "85mm"],
+    }
+
+
+def test_second_stage_mustache_variables_workflow_uses_upstream_variable_settings():
+    first_stage_variables = {
+        "animal": ["fox", "wolf"],
+        "lens": ["35mm", "85mm"],
+    }
+
+    first_stage_sampled = sample_mustache_variable_list(
+        first_stage_variables,
+        sampling_mode="sequential",
+        limit=2,
+    )
+
+    reordered_stage = ReorderList()
+    (reordered_variables,) = reordered_stage.reorder(first_stage_sampled, ["reverse"], [0])
+
+    second_stage_node = MustacheVariables()
+    (second_stage_variables,) = second_stage_node.parse_variables(
+        "subject_identity:\n"
+        "  - {{animal}}\n"
+        "camera_lens:\n"
+        "  - {{lens}}\n"
+        "prompt:\n"
+        "  - portrait of a {{animal}}\n",
+        reordered_variables,
+    )
+
+    assert second_stage_variables == {
+        "subject_identity": ["fox", "fox"],
+        "camera_lens": ["85mm", "35mm"],
+        "prompt": ["portrait of a fox", "portrait of a fox"],
+    }
+
+
 def test_mustache_variable_sampler_returns_variable_list():
     node = MustacheVariableSampler()
 

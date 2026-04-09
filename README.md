@@ -402,6 +402,7 @@ Parses a YAML mapping of variable names to candidate values and packages it as a
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `yaml_text` | `STRING` or `STRING` list | sample YAML | multiline | YAML mapping of variable names to values, or a YAML list of mappings. Lists of scalar values are the normal form for each variable; scalar values are accepted as shorthand and are wrapped into a one-item list. Each final value is coerced to text before rendering. When a list of YAML strings is provided, all mappings are merged together. |
+| `variables` | `MUSTACHE_VARIABLE_LIST` | – | optional | Optional concrete variable settings used to render the YAML before parsing it. This is the input to use when you want one `Mustache Variables` stage to templatize another one. Each entry renders the YAML once, and the parsed mappings are then merged together. |
 
 ##### Example YAML
 
@@ -421,7 +422,9 @@ leglength:
 - Nested objects and nested lists inside variable values are rejected.
 - Empty input returns an empty variable set.
 - When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
-- This makes it possible to feed a list-valued `STRING` output, such as templated YAML generated upstream, back into `Mustache Variables`.
+- If `variables` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used to render it first.
+- This is the intended way to chain stages such as `Mustache Variables -> Mustache Variable Sampler -> Reorder List -> Mustache Variables`.
+- Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
 
 ---
 
