@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 MustacheVariablesDict = Dict[str, List[str]]
 MustacheVariableList = List[Dict[str, str]]
-CompiledMustacheTemplate = tuple[str, List[str], Dict[str, str]]
+CompiledMustacheTemplate = tuple[str, List[str], Dict[str, str], Dict[str, str]]
 
 _SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
 _DEFAULT_VARIABLES_YAML = (
@@ -37,6 +37,7 @@ _VARIABLE_TEMPLATE_SPECS_KEY = "__mustache_template_specs__"
 _WEIGHTED_VALUE_PATTERN = re.compile(r"^(.*?):([0-9]*\.?[0-9]+)\s*$")
 _WEIGHT_TOLERANCE = 1e-6
 _RESERVED_VARIABLE_KEYS = {_VARIABLE_WEIGHTS_KEY, _VARIABLE_TEMPLATE_SPECS_KEY}
+_TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize"}
 
 
 def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
@@ -220,7 +221,7 @@ def _compile_local_template_value(
     variable_name: str,
     variables: MustacheVariablesDict,
 ) -> CompiledMustacheTemplate | None:
-    compiled_format, referenced_variables, field_name_to_variable = _compile_mustache_template(template_text)
+    compiled_format, referenced_variables, field_name_to_variable, field_name_to_setting = _compile_mustache_template(template_text)
     if not referenced_variables:
         return None
 
@@ -231,7 +232,7 @@ def _compile_local_template_value(
             f"Mustache variable '{variable_name}' references undefined variables: {', '.join(sorted(missing))}. "
             "Local template references must be defined earlier in the YAML or supplied through the input variables."
         )
-    return compiled_format, referenced_variables, field_name_to_variable
+    return compiled_format, referenced_variables, field_name_to_variable, field_name_to_setting
 
 
 def _parse_variable_values(
@@ -504,7 +505,7 @@ def render_mustache_yaml_inputs(
                 )
             rendered_inputs.append(
                 _MUSTACHE_VARIABLE_PATTERN.sub(
-                    lambda match: mapping.get(match.group(1).strip(), match.group(0)),
+                    lambda match: mapping.get(_parse_template_variable_reference(match.group(1))[0], match.group(0)),
                     template_text,
                 )
             )
@@ -522,6 +523,69 @@ class _FormatMapView:
         return self.variables[self.field_name_to_variable.get(field_name, field_name)]
 
 
+class _LazyFormatMapView:
+    __slots__ = (
+        "root_variables",
+        "resolved_variables",
+        "field_name_to_variable",
+        "field_name_to_setting",
+        "rng",
+        "repeated_choices",
+    )
+
+    def __init__(
+        self,
+        root_variables: MustacheVariablesDict,
+        resolved_variables: Dict[str, str],
+        field_name_to_variable: Dict[str, str],
+        field_name_to_setting: Dict[str, str],
+        rng: random.Random,
+    ):
+        self.root_variables = root_variables
+        self.resolved_variables = resolved_variables
+        self.field_name_to_variable = field_name_to_variable
+        self.field_name_to_setting = field_name_to_setting
+        self.rng = rng
+        self.repeated_choices: Dict[str, str] = {}
+
+    def __getitem__(self, field_name: str) -> str:
+        variable_name = self.field_name_to_variable.get(field_name, field_name)
+        setting = self.field_name_to_setting.get(field_name)
+
+        if setting == "randomize":
+            value = _choose_random_lazy_variable_value(
+                variable_name,
+                variables=self.root_variables,
+                resolved_variables=self.resolved_variables,
+                rng=self.rng,
+            )
+            self.repeated_choices[variable_name] = value
+            return value
+
+        if setting == "repeat":
+            if variable_name in self.repeated_choices:
+                return self.repeated_choices[variable_name]
+            if variable_name in self.resolved_variables:
+                value = self.resolved_variables[variable_name]
+                self.repeated_choices[variable_name] = value
+                return value
+            value = _choose_random_lazy_variable_value(
+                variable_name,
+                variables=self.root_variables,
+                resolved_variables=self.resolved_variables,
+                rng=self.rng,
+            )
+            self.repeated_choices[variable_name] = value
+            return value
+
+        if variable_name not in self.resolved_variables:
+            raise KeyError(variable_name)
+
+        value = self.resolved_variables[variable_name]
+        self.repeated_choices[variable_name] = value
+        return value
+
+
 def _escape_format_literal(text: str) -> str:
     return text.replace("{", "{{").replace("}", "}}")
 
@@ -530,35 +594,86 @@ def _can_use_direct_format_field(variable_name: str) -> bool:
     return variable_name.isidentifier()
 
 
-def _compile_mustache_template(template_text: str) -> tuple[str, List[str], Dict[str, str]]:
+def _find_last_unescaped_colon(text: str) -> int:
+    escape = False
+    last_colon_index = -1
+    for index, char in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if char == "\\":
+            escape = True
+            continue
+        if char == ":":
+            last_colon_index = index
+    return last_colon_index
+
+
+def _parse_template_variable_reference(reference_text: str) -> tuple[str, str | None]:
+    stripped_reference = str(reference_text).strip()
+    split_index = _find_last_unescaped_colon(stripped_reference)
+    variable_text = stripped_reference
+    setting = None
+
+    if split_index >= 0:
+        maybe_setting = stripped_reference[split_index + 1 :].strip().lower()
+        if maybe_setting:
+            if maybe_setting not in _TEMPLATE_INSTANCE_SETTINGS:
+                raise ValueError(
+                    f"Unsupported mustache instance setting '{maybe_setting}'. "
+                    f"Expected one of {tuple(sorted(_TEMPLATE_INSTANCE_SETTINGS))}."
+                )
+            variable_text = stripped_reference[:split_index]
+            setting = maybe_setting
+
+    variable_name = variable_text.replace("\\:", ":").strip()
+    if not variable_name:
+        raise ValueError("Mustache template variable names must be non-empty.")
+    return variable_name, setting
+
+
+def _compile_mustache_template(template_text: str) -> tuple[str, List[str], Dict[str, str], Dict[str, str]]:
     format_parts: List[str] = []
     referenced_variables: List[str] = []
     field_name_to_variable: Dict[str, str] = {}
+    field_name_to_setting: Dict[str, str] = {}
     field_name_by_variable: Dict[str, str] = {}
     last_index = 0
+    synthetic_field_index = 0
 
     for match in _MUSTACHE_VARIABLE_PATTERN.finditer(template_text):
         format_parts.append(_escape_format_literal(template_text[last_index:match.start()]))
-        variable_name = match.group(1).strip()
-        if variable_name not in field_name_by_variable:
-            if _can_use_direct_format_field(variable_name):
-                field_name = variable_name
-            else:
-                field_name = f"mustache_{len(field_name_to_variable)}"
-                field_name_to_variable[field_name] = variable_name
-            field_name_by_variable[variable_name] = field_name
+        variable_name, setting = _parse_template_variable_reference(match.group(1))
+        if variable_name not in referenced_variables:
             referenced_variables.append(variable_name)
-        format_parts.append("{")
-        format_parts.append(field_name_by_variable[variable_name])
-        format_parts.append("}")
+        if setting is None:
+            if variable_name not in field_name_by_variable:
+                if _can_use_direct_format_field(variable_name):
+                    field_name = variable_name
+                else:
+                    field_name = f"mustache_{synthetic_field_index}"
+                    synthetic_field_index += 1
+                    field_name_to_variable[field_name] = variable_name
+                field_name_by_variable[variable_name] = field_name
+            format_parts.append("{")
+            format_parts.append(field_name_by_variable[variable_name])
+            format_parts.append("}")
+        else:
+            field_name = f"mustache_{synthetic_field_index}"
+            synthetic_field_index += 1
+            field_name_to_variable[field_name] = variable_name
+            field_name_to_setting[field_name] = setting
+            format_parts.append("{")
+            format_parts.append(field_name)
+            format_parts.append("}")
         last_index = match.end()
 
     format_parts.append(_escape_format_literal(template_text[last_index:]))
-    return "".join(format_parts), referenced_variables, field_name_to_variable
+    return "".join(format_parts), referenced_variables, field_name_to_variable, field_name_to_setting
 
 
 def extract_template_variables(template: str) -> List[str]:
-    _, referenced_variables, _ = _compile_mustache_template(str(template))
+    _, referenced_variables, _, _ = _compile_mustache_template(str(template))
     return referenced_variables
 
 
@@ -610,6 +725,26 @@ def _render_compiled_template(
     if not field_name_to_variable:
         return compiled_format.format_map(mapping)
     return compiled_format.format_map(_FormatMapView(mapping, field_name_to_variable))
+
+
+def _render_lazy_compiled_template(
+    compiled_format: str,
+    field_name_to_variable: Dict[str, str],
+    field_name_to_setting: Dict[str, str],
+    *,
+    variables: MustacheVariablesDict,
+    resolved_variables: Dict[str, str],
+    rng: random.Random,
+) -> str:
+    return compiled_format.format_map(
+        _LazyFormatMapView(
+            variables,
+            resolved_variables,
+            field_name_to_variable,
+            field_name_to_setting,
+            rng,
+        )
+    )
 
 
 def _decode_text_separator(separator: str) -> str:
@@ -756,12 +891,48 @@ def _weighted_random_sample_mustache_variable_list(
     return sampled_indices
 
 
+def _choose_random_lazy_variable_value(
+    variable_name: str,
+    *,
+    variables: MustacheVariablesDict,
+    resolved_variables: Dict[str, str],
+    rng: random.Random,
+) -> str:
+    available_values = variables.get(variable_name)
+    if not isinstance(available_values, list) or not available_values:
+        raise ValueError(f"Mustache variable '{variable_name}' does not contain any values to randomize from.")
+
+    weights = _get_variable_weights(variables, variable_name)
+    if weights is None:
+        choice_index = rng.randrange(len(available_values))
+    else:
+        cumulative_weights: List[float] = []
+        running_total = 0.0
+        for weight in weights:
+            running_total += float(weight)
+            cumulative_weights.append(running_total)
+        choice_index = _weighted_choice_index(cumulative_weights, rng)
+
+    template_specs = _get_variable_template_specs(variables, variable_name)
+    template_spec = None if template_specs is None else template_specs[choice_index]
+    return _render_lazy_variable_value(
+        available_values[choice_index],
+        template_spec,
+        variable_name=variable_name,
+        resolved_variables=resolved_variables,
+        variables=variables,
+        rng=rng,
+    )
+
+
 def _render_lazy_variable_value(
     raw_value: str,
     template_spec: CompiledMustacheTemplate | None,
     *,
     variable_name: str,
     resolved_variables: Dict[str, str],
+    variables: MustacheVariablesDict,
+    rng: random.Random,
 ) -> str:
     if template_spec is None:
         template_spec = _compile_local_template_value(
@@ -772,13 +943,21 @@ def _render_lazy_variable_value(
         if template_spec is None:
             return raw_value
 
-    compiled_format, referenced_variables, field_name_to_variable = template_spec
-    missing = [name for name in referenced_variables if name not in resolved_variables]
-    if missing:
-        raise ValueError(
-            f"Mustache variable '{variable_name}' references undefined variables during sampling: {', '.join(sorted(missing))}."
+    compiled_format, _, field_name_to_variable, field_name_to_setting = template_spec
+    try:
+        return _render_lazy_compiled_template(
+            compiled_format,
+            field_name_to_variable,
+            field_name_to_setting,
+            variables=variables,
+            resolved_variables=resolved_variables,
+            rng=rng,
         )
-    return _render_compiled_template(compiled_format, field_name_to_variable, resolved_variables)
+    except KeyError as exc:
+        missing_variable = str(exc.args[0])
+        raise ValueError(
+            f"Mustache variable '{variable_name}' references undefined variables during sampling: {missing_variable}."
+        ) from exc
 
 
 def _render_variable_setting_from_indices(
@@ -786,6 +965,9 @@ def _render_variable_setting_from_indices(
     value_sets: Sequence[Sequence[str]],
     template_spec_sets: Sequence[Sequence[CompiledMustacheTemplate | None]],
     selection_indices: Sequence[int],
+    *,
+    variables: MustacheVariablesDict,
+    rng: random.Random,
 ) -> Dict[str, str]:
     rendered_setting: Dict[str, str] = {}
     for position, variable_name in enumerate(ordered_keys):
@@ -795,6 +977,8 @@ def _render_variable_setting_from_indices(
             template_spec_sets[position][value_index],
             variable_name=variable_name,
             resolved_variables=rendered_setting,
+            variables=variables,
+            rng=rng,
         )
     return rendered_setting
 
@@ -881,7 +1065,14 @@ def sample_mustache_variable_list(
         ]
 
     sampled_variables = [
-        _render_variable_setting_from_indices(ordered_keys, value_sets, template_spec_sets, selection_indices)
+        _render_variable_setting_from_indices(
+            ordered_keys,
+            value_sets,
+            template_spec_sets,
+            selection_indices,
+            variables=variables,
+            rng=rng,
+        )
         for selection_indices in sampled_selection_indices
     ]
 
@@ -902,7 +1093,7 @@ def render_mustache_template_list(
     variable_list: MustacheVariableList,
 ) -> List[str]:
     template_text = str(template)
-    compiled_format, referenced_variables, field_name_to_variable = _compile_mustache_template(template_text)
+    compiled_format, referenced_variables, field_name_to_variable, _ = _compile_mustache_template(template_text)
 
     if not variable_list:
         logger.debug("Mustache template received an empty variable list; returning no outputs.")

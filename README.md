@@ -435,6 +435,18 @@ hairstyle:
   - {{color}} hair in a {{hairarrangement}}
 ```
 
+Lazy local references also support placeholder-level instance settings:
+
+```yaml
+color:
+  - brown
+  - blue
+  - black
+
+pair:
+  - {{color:randomize}} hair with {{color:repeat}} eyes
+```
+
 ##### Notes
 
 - YAML must parse to a mapping or to a list of mappings at the top level.
@@ -447,6 +459,8 @@ hairstyle:
 - Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
 - Variable values may reference variables defined earlier in the same YAML. Those references are validated in top-to-bottom order, but they stay lazy inside `MUSTACHE_VARIABLES` and are only rendered when `Mustache Variable Sampler` synthesizes concrete settings.
 - Local template references must point to variables defined earlier in the YAML or to values supplied through the optional `variables` input. Referencing a later variable raises an error.
+- Placeholder instance settings are written inside the mustache expression, such as `{{color:randomize}}` or `{{color:repeat}}`. Escape a literal colon in the variable name as `\:` if needed.
+- `randomize` draws a fresh seeded random value from that variable's full value list during lazy rendering. `repeat` reuses the most recent value chosen for that variable earlier in the same lazy template render, falling back to the current resolved value when there is one.
 - Random weights can be attached to a variable value by appending `:probability` to the end of the scalar, for example `black:0.4`.
 - When any value for a variable uses a `:probability` suffix, every value for that variable must use one, and the probabilities for that variable must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
@@ -474,6 +488,7 @@ Expands a `MUSTACHE_VARIABLES` mapping into a `MUSTACHE_VARIABLE_LIST`, where ea
 
 - This node now owns permutation generation, so large Cartesian products can be capped before `Mustache Template` runs.
 - Locally derived YAML values from `Mustache Variables` also expand here, not during YAML parsing, so sampler `limit` is now the place where recursive/local variable explosions are controlled.
+- Lazy placeholder settings like `{{color:randomize}}` are also resolved here. They use the node's seeded RNG, so repeated runs with the same `seed` stay deterministic.
 - In `random` mode, the sampler does not merely shuffle value lists. It randomizes key order, value order, and the emitted permutation order so the resulting `MUSTACHE_VARIABLE_LIST` is a seeded random subset/permutation of the full space.
 - When a variable value list carries `:probability` metadata from `Mustache Variables`, random sampling uses those probabilities instead of assuming a uniform distribution.
 - Weighted random sampling still emits unique concrete settings. For moderate product sizes it does exact weighted sampling without replacement; for huge spaces it falls back to repeated weighted draws with duplicate rejection.

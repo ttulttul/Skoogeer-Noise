@@ -137,6 +137,16 @@ def test_parse_mustache_variables_yaml_rejects_local_references_to_later_variabl
         )
 
 
+def test_parse_mustache_variables_yaml_rejects_unknown_instance_settings():
+    with pytest.raises(ValueError, match="Unsupported mustache instance setting"):
+        parse_mustache_variables_yaml(
+            "hairstyle:\n"
+            "  - {{color:sideways}} hair\n"
+            "color:\n"
+            "  - brown\n"
+        )
+
+
 def test_parse_mustache_variables_yaml_rejects_partial_weights():
     with pytest.raises(ValueError, match="mixes weighted and unweighted values"):
         parse_mustache_variables_yaml(
@@ -167,6 +177,14 @@ def test_extract_template_variables_preserves_first_appearance_order():
     )
 
     assert variables == ["haircolor", "leglength"]
+
+
+def test_extract_template_variables_ignores_instance_settings_and_unescapes_colons():
+    variables = extract_template_variables(
+        "A {{haircolor:randomize}} coat, {{haircolor:repeat}}, and {{camera\\:lens}}."
+    )
+
+    assert variables == ["haircolor", "camera:lens"]
 
 
 def test_sample_mustache_variable_list_generates_all_products_in_sequential_order():
@@ -283,6 +301,35 @@ def test_sample_mustache_variable_list_random_respects_value_weights():
     assert 0.24 <= counts["brown"] / 1000 <= 0.36
     assert 0.24 <= counts["blue"] / 1000 <= 0.36
     assert 0.33 <= counts["black"] / 1000 <= 0.47
+
+
+def test_sample_mustache_variable_list_supports_randomize_and_repeat_settings():
+    variables = parse_mustache_variables_yaml(
+        "color:\n"
+        "  - brown\n"
+        "  - blue\n"
+        "  - black\n"
+        "pair:\n"
+        "  - {{color:randomize}} and {{color:repeat}}\n"
+    )
+
+    first = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        seed=42,
+        limit=-1,
+    )
+    second = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        seed=42,
+        limit=-1,
+    )
+
+    assert first == second
+    for entry in first:
+        left, right = entry["pair"].split(" and ", maxsplit=1)
+        assert left == right
 
 
 def test_sample_mustache_variable_list_random_preserves_lazy_dependency_order():
@@ -451,6 +498,22 @@ def test_mustache_variables_node_renders_yaml_against_variable_list_input():
     assert variables == {
         "subject_identity": ["fox", "wolf"],
         "camera_lens": ["35mm", "85mm"],
+    }
+
+
+def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_instance_settings():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables(
+        "subject_identity:\n"
+        "  - {{animal:repeat}}\n",
+        [
+            {"animal": "fox"},
+        ],
+    )
+
+    assert variables == {
+        "subject_identity": ["fox"],
     }
 
 
