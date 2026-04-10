@@ -39,8 +39,8 @@ _VARIABLE_TEMPLATE_SPECS_KEY = "__mustache_template_specs__"
 _WEIGHTED_VALUE_PATTERN = re.compile(r"^(.*?):([0-9]*\.?[0-9]+)\s*$")
 _WEIGHT_TOLERANCE = 1e-6
 _RESERVED_VARIABLE_KEYS = {_VARIABLE_WEIGHTS_KEY, _VARIABLE_TEMPLATE_SPECS_KEY}
-_TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize", "lowercase", "propercase", "uppercase", "trim"}
-_TEMPLATE_SELECTION_SETTINGS = {"repeat", "randomize"}
+_TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize", "static", "lowercase", "propercase", "uppercase", "notrim"}
+_TEMPLATE_SELECTION_SETTINGS = {"repeat", "randomize", "static"}
 _TEMPLATE_CASE_SETTINGS = {"lowercase", "propercase", "uppercase"}
 
 
@@ -312,20 +312,28 @@ def _parse_variable_values(
     if not values:
         raise ValueError(f"Mustache variable '{variable_name}' must contain at least one value.")
 
-    if 0 < explicit_weight_count < len(values):
-        raise ValueError(
-            f"Mustache variable '{variable_name}' mixes weighted and unweighted values; "
-            "every value must provide a trailing :probability when any one does."
-        )
-
     derived_weights: List[float] | None = None
-    if explicit_weight_count == len(values):
+    if explicit_weight_count > 0:
         explicit_weight_total = sum(float(explicit_weight) for explicit_weight in explicit_weights if explicit_weight is not None)
-        if abs(explicit_weight_total - 1.0) > _WEIGHT_TOLERANCE:
+        if explicit_weight_total > 1.0 + _WEIGHT_TOLERANCE:
             raise ValueError(
-                f"Mustache variable '{variable_name}' weights must sum to 1.0, got {explicit_weight_total:.6f}."
+                f"Mustache variable '{variable_name}' weights must not exceed 1.0, got {explicit_weight_total:.6f}."
             )
-        derived_weights = [float(explicit_weight) for explicit_weight in explicit_weights if explicit_weight is not None]
+
+        if explicit_weight_count == len(values):
+            if abs(explicit_weight_total - 1.0) > _WEIGHT_TOLERANCE:
+                raise ValueError(
+                    f"Mustache variable '{variable_name}' weights must sum to 1.0, got {explicit_weight_total:.6f}."
+                )
+            derived_weights = [float(explicit_weight) for explicit_weight in explicit_weights if explicit_weight is not None]
+        else:
+            remaining_weight = max(0.0, 1.0 - explicit_weight_total)
+            unspecified_count = len(values) - explicit_weight_count
+            shared_weight = remaining_weight / unspecified_count
+            derived_weights = [
+                shared_weight if explicit_weight is None else float(explicit_weight)
+                for explicit_weight in explicit_weights
+            ]
 
     if all(template_spec is None for template_spec in template_specs):
         template_specs = None
@@ -368,10 +376,10 @@ def _collect_parsed_mustache_variable_definitions(parsed, *, collected: Dict[str
         collected[key] = raw_values
 
 
-def _quote_mustache_yaml_scalars(yaml_text: str) -> str:
+def _quote_yaml_scalars(yaml_text: str, *, require_mustache: bool) -> str:
     quoted_lines: List[str] = []
     for line in str(yaml_text).splitlines():
-        if "{{" not in line and "}}" not in line:
+        if require_mustache and "{{" not in line and "}}" not in line:
             quoted_lines.append(line)
             continue
 
@@ -382,17 +390,17 @@ def _quote_mustache_yaml_scalars(yaml_text: str) -> str:
 
         prefix = None
         remainder = None
-        list_match = re.match(r"^(\s*-\s+)(.+)$", line)
+        list_match = re.match(r"^(\s*-\s)(.*)$", line)
         if list_match is not None:
             prefix = list_match.group(1)
             remainder = list_match.group(2)
         else:
-            mapping_match = re.match(r"^(\s*[^:\n]+:\s+)(.+)$", line)
+            mapping_match = re.match(r"^(\s*[^:\n]+:\s)(.*)$", line)
             if mapping_match is not None:
                 prefix = mapping_match.group(1)
                 remainder = mapping_match.group(2)
 
-        if prefix is None or remainder is None:
+        if prefix is None or remainder is None or remainder == "":
             quoted_lines.append(line)
             continue
 
@@ -407,6 +415,10 @@ def _quote_mustache_yaml_scalars(yaml_text: str) -> str:
     if str(yaml_text).endswith("\n"):
         quoted_text += "\n"
     return quoted_text
+
+
+def _quote_mustache_yaml_scalars(yaml_text: str) -> str:
+    return _quote_yaml_scalars(yaml_text, require_mustache=True)
 
 
 def _construct_yaml_value(loader: yaml.Loader, node):
@@ -592,9 +604,12 @@ def render_mustache_yaml_inputs(
                     f"MUSTACHE_VARIABLE_LIST items must be dictionaries, got {type(mapping).__name__} at index {setting_index}."
                 )
             rendered_inputs.append(
-                _MUSTACHE_VARIABLE_PATTERN.sub(
-                    lambda match: _render_yaml_input_placeholder(match.group(1), mapping),
-                    template_text,
+                _quote_yaml_scalars(
+                    _MUSTACHE_VARIABLE_PATTERN.sub(
+                        lambda match: _render_yaml_input_placeholder(match.group(1), mapping),
+                        template_text,
+                    ),
+                    require_mustache=False,
                 )
             )
     return rendered_inputs
@@ -609,8 +624,12 @@ def _render_yaml_input_placeholder(reference_text: str, mapping: Dict[str, str])
 
 def _apply_template_instance_settings(value: str, settings: TemplateInstanceSettings) -> str:
     text = str(value)
+    if "notrim" not in settings:
+        text = text.strip()
     for setting in settings:
         if setting in _TEMPLATE_SELECTION_SETTINGS:
+            continue
+        if setting == "notrim":
             continue
         if setting == "lowercase":
             text = text.lower()
@@ -674,7 +693,7 @@ class _LazyFormatMapView:
         variable_name = self.field_name_to_variable.get(field_name, field_name)
         settings = self.field_name_to_settings.get(field_name, ())
         selection_settings = [setting for setting in settings if setting in _TEMPLATE_SELECTION_SETTINGS]
-        selection_setting = selection_settings[0] if selection_settings else None
+        selection_setting = selection_settings[0] if selection_settings else "randomize"
 
         if selection_setting == "randomize":
             raw_value = _choose_random_lazy_variable_value(
@@ -682,12 +701,17 @@ class _LazyFormatMapView:
                 variables=self.root_variables,
                 resolved_variables=self.resolved_variables,
                 rng=self.rng,
-            )
+                )
+        elif selection_setting == "static":
+            if variable_name in self.resolved_variables:
+                raw_value = self.resolved_variables[variable_name]
+            elif variable_name in self.repeated_choices:
+                raw_value = self.repeated_choices[variable_name]
+            else:
+                raise KeyError(variable_name)
         elif selection_setting == "repeat":
             if variable_name in self.repeated_choices:
                 raw_value = self.repeated_choices[variable_name]
-            elif variable_name in self.resolved_variables:
-                raw_value = self.resolved_variables[variable_name]
             else:
                 raw_value = _choose_random_lazy_variable_value(
                     variable_name,

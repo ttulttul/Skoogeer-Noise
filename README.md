@@ -432,7 +432,7 @@ hairarrangement:
   - bun
 
 hairstyle:
-  - {{color}} hair in a {{hairarrangement}}
+  - {{color:static}} hair in a {{hairarrangement:static}}
 ```
 
 Lazy local references also support placeholder-level instance settings:
@@ -444,7 +444,7 @@ color:
   - black
 
 pair:
-  - {{color:randomize}} hair with {{color:repeat}} eyes
+  - {{color}} hair with {{color:repeat}} eyes
 ```
 
 ##### Notes
@@ -460,12 +460,14 @@ pair:
 - Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
 - Variable values may reference any other variable defined in the same YAML, regardless of source order. Those references stay lazy inside `MUSTACHE_VARIABLES` and are only rendered when `Mustache Variable Sampler` synthesizes concrete settings.
 - Local template references must point to variables defined somewhere in the same YAML or to values supplied through the optional `variables` input. Referencing a missing variable raises an error.
-- Placeholder instance settings are written inside the mustache expression, such as `{{color:randomize}}`, `{{color:repeat}}`, `{{color:lowercase}}`, `{{color:propercase}}`, `{{color:uppercase}}`, or `{{color:trim}}`. Escape a literal colon in the variable name as `\:` if needed.
-- Multiple compatible settings can be combined with commas, such as `{{color:trim,randomize}}` or `{{color:uppercase,trim}}`.
-- `randomize` draws a fresh seeded random value from that variable's full value list during lazy rendering. `repeat` reuses the most recent value chosen for that variable earlier in the same lazy template render, falling back to the current resolved value when there is one. `lowercase`, `propercase`, `uppercase`, and `trim` transform the filled-in value after lookup.
-- `randomize` and `repeat` are mutually exclusive selection actions, and `lowercase`, `propercase`, and `uppercase` are mutually exclusive case transforms. Invalid combinations raise an error.
+- Placeholder instance settings are written inside the mustache expression, such as `{{color:static}}`, `{{color:repeat}}`, `{{color:lowercase}}`, `{{color:propercase}}`, `{{color:uppercase}}`, or `{{color:notrim}}`. Escape a literal colon in the variable name as `\:` if needed.
+- By default, placeholders trim surrounding whitespace from the filled-in value and use `randomize` behavior during lazy expansion. Use `notrim` to preserve surrounding whitespace and `static` to opt out of per-instantiation random choice.
+- Multiple compatible settings can be combined with commas, such as `{{color:static,lowercase}}` or `{{color:uppercase,notrim}}`.
+- `randomize` is the default lazy selection mode and draws a fresh seeded random value from that variable's full value list during lazy rendering. `static` uses the already-resolved variable value instead, and `repeat` reuses the most recent lazy choice for that variable earlier in the same template render.
+- `lowercase`, `propercase`, `uppercase`, and the default trim behavior transform the filled-in value after lookup.
+- `randomize`, `repeat`, and `static` are mutually exclusive selection actions, and `lowercase`, `propercase`, and `uppercase` are mutually exclusive case transforms. Invalid combinations raise an error.
 - Random weights can be attached to a variable value by appending `:probability` to the end of the scalar, for example `black:0.4`.
-- When any value for a variable uses a `:probability` suffix, every value for that variable must use one, and the probabilities for that variable must sum to `1.0`.
+- If only some values for a variable use a `:probability` suffix, the unspecified values split the remaining probability mass evenly. If every value is weighted explicitly, their probabilities must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
 - The `variables` input tolerates nested list wrappers from upstream list utilities and concatenation nodes, as long as the leaves are variable-setting dictionaries.
 

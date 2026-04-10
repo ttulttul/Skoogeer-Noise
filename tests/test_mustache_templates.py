@@ -107,7 +107,7 @@ def test_parse_mustache_variables_inputs_merges_multiple_yaml_strings():
 def test_parse_mustache_variables_yaml_expands_local_references_without_order_constraints():
     variables = parse_mustache_variables_yaml(
         "hairstyle:\n"
-        "  - {{color}} hair in a {{hairarrangement}}\n"
+        "  - {{color:static}} hair in a {{hairarrangement:static}}\n"
         "color:\n"
         "  - brown\n"
         "  - blue\n"
@@ -118,7 +118,7 @@ def test_parse_mustache_variables_yaml_expands_local_references_without_order_co
 
     assert variables["color"] == ["brown", "blue"]
     assert variables["hairarrangement"] == ["ponytail", "bun"]
-    assert variables["hairstyle"] == ["{{color}} hair in a {{hairarrangement}}"]
+    assert variables["hairstyle"] == ["{{color:static}} hair in a {{hairarrangement:static}}"]
 
     sampled = sample_mustache_variable_list(
         variables,
@@ -187,12 +187,27 @@ def test_parse_mustache_variables_yaml_rejects_multiple_selection_settings():
         )
 
 
-def test_parse_mustache_variables_yaml_rejects_partial_weights():
-    with pytest.raises(ValueError, match="mixes weighted and unweighted values"):
+def test_parse_mustache_variables_yaml_distributes_remaining_weight_across_unweighted_values():
+    variables = parse_mustache_variables_yaml(
+        "color:\n"
+        "  - brown\n"
+        "  - purple\n"
+        "  - white:0.5\n"
+    )
+
+    assert variables["color"] == ["brown", "purple", "white"]
+
+    weights = variables["__mustache_weights__"]["color"]
+    assert weights == pytest.approx([0.25, 0.25, 0.5])
+
+
+def test_parse_mustache_variables_yaml_rejects_weight_total_above_one():
+    with pytest.raises(ValueError, match="weights must not exceed 1.0"):
         parse_mustache_variables_yaml(
             "color:\n"
-            "  - brown:0.5\n"
-            "  - blue\n"
+            "  - brown:0.8\n"
+            "  - blue:0.3\n"
+            "  - black\n"
         )
 
 
@@ -221,7 +236,7 @@ def test_extract_template_variables_preserves_first_appearance_order():
 
 def test_extract_template_variables_ignores_instance_settings_and_unescapes_colons():
     variables = extract_template_variables(
-        "A {{haircolor:trim,randomize}} coat, {{haircolor:repeat}}, {{haircolor:lowercase}}, {{haircolor:propercase}}, {{haircolor:uppercase}}, {{haircolor:trim}}, and {{camera\\:lens}}."
+        "A {{haircolor:randomize}} coat, {{haircolor:static}}, {{haircolor:repeat}}, {{haircolor:lowercase}}, {{haircolor:propercase}}, {{haircolor:uppercase}}, {{haircolor:notrim}}, and {{camera\\:lens}}."
     )
 
     assert variables == ["haircolor", "camera:lens"]
@@ -372,6 +387,44 @@ def test_sample_mustache_variable_list_supports_randomize_and_repeat_settings():
         assert left == right
 
 
+def test_sample_mustache_variable_list_trims_by_default():
+    variables = parse_mustache_variables_yaml(
+        "TitleCase:\n"
+        "  - '  Golden Hour  '\n"
+        "label:\n"
+        "  - {{TitleCase}}\n"
+    )
+
+    sampled = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        limit=-1,
+    )
+
+    assert sampled == [
+        {"TitleCase": "  Golden Hour  ", "label": "Golden Hour"},
+    ]
+
+
+def test_sample_mustache_variable_list_supports_notrim_setting():
+    variables = parse_mustache_variables_yaml(
+        "TitleCase:\n"
+        "  - '  Golden Hour  '\n"
+        "label:\n"
+        "  - {{TitleCase:notrim}}\n"
+    )
+
+    sampled = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        limit=-1,
+    )
+
+    assert sampled == [
+        {"TitleCase": "  Golden Hour  ", "label": "  Golden Hour  "},
+    ]
+
+
 def test_sample_mustache_variable_list_supports_lowercase_setting():
     variables = parse_mustache_variables_yaml(
         "TitleCase:\n"
@@ -429,32 +482,13 @@ def test_sample_mustache_variable_list_supports_uppercase_setting():
     ]
 
 
-def test_sample_mustache_variable_list_supports_trim_setting():
+def test_sample_mustache_variable_list_supports_default_randomize_setting():
     variables = parse_mustache_variables_yaml(
         "word:\n"
-        "  - '  hello  '\n"
+        "  - hello\n"
+        "  - world\n"
         "label:\n"
-        "  - {{word:trim}}\n"
-    )
-
-    sampled = sample_mustache_variable_list(
-        variables,
-        sampling_mode="sequential",
-        limit=-1,
-    )
-
-    assert sampled == [
-        {"word": "  hello  ", "label": "hello"},
-    ]
-
-
-def test_sample_mustache_variable_list_supports_trim_and_randomize_settings():
-    variables = parse_mustache_variables_yaml(
-        "word:\n"
-        "  - '  hello  '\n"
-        "  - '  world  '\n"
-        "label:\n"
-        "  - {{word:trim,randomize}}\n"
+        "  - {{word}}\n"
     )
 
     first = sample_mustache_variable_list(
@@ -472,6 +506,29 @@ def test_sample_mustache_variable_list_supports_trim_and_randomize_settings():
 
     assert first == second
     assert {entry["label"] for entry in first} <= {"hello", "world"}
+    assert any(entry["label"] != entry["word"] for entry in first)
+
+
+def test_sample_mustache_variable_list_supports_static_setting():
+    variables = parse_mustache_variables_yaml(
+        "word:\n"
+        "  - hello\n"
+        "  - world\n"
+        "label:\n"
+        "  - {{word:static}}\n"
+    )
+
+    sampled = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        seed=42,
+        limit=-1,
+    )
+
+    assert sampled == [
+        {"word": "hello", "label": "hello"},
+        {"word": "world", "label": "world"},
+    ]
 
 
 def test_sample_mustache_variable_list_random_preserves_lazy_dependency_order():
@@ -480,7 +537,7 @@ def test_sample_mustache_variable_list_random_preserves_lazy_dependency_order():
         "  - slim\n"
         "  - athletic\n"
         "build2:\n"
-        "  - {{body_type2}}\n"
+        "  - {{body_type2:static}}\n"
     )
 
     sampled = sample_mustache_variable_list(
@@ -579,6 +636,28 @@ def test_render_mustache_template_list_supports_variable_names_with_spaces():
     assert rendered == ["Lens: 35mm"]
 
 
+def test_render_mustache_template_list_trims_by_default():
+    rendered = render_mustache_template_list(
+        "Lens: {{camera lens}}",
+        [
+            {"camera lens": "  35mm  "},
+        ],
+    )
+
+    assert rendered == ["Lens: 35mm"]
+
+
+def test_render_mustache_template_list_supports_notrim_setting():
+    rendered = render_mustache_template_list(
+        "Lens: {{camera lens:notrim}}",
+        [
+            {"camera lens": "  35mm  "},
+        ],
+    )
+
+    assert rendered == ["Lens:   35mm  "]
+
+
 def test_render_mustache_template_list_supports_lowercase_setting():
     rendered = render_mustache_template_list(
         "Lens: {{camera lens:lowercase}}",
@@ -612,20 +691,9 @@ def test_render_mustache_template_list_supports_uppercase_setting():
     assert rendered == ["Lens: HELLO"]
 
 
-def test_render_mustache_template_list_supports_trim_setting():
-    rendered = render_mustache_template_list(
-        "Lens: {{camera lens:trim}}",
-        [
-            {"camera lens": "  hello  "},
-        ],
-    )
-
-    assert rendered == ["Lens: hello"]
-
-
 def test_render_mustache_template_list_supports_uppercase_and_trim_settings():
     rendered = render_mustache_template_list(
-        "Lens: {{camera lens:uppercase,trim}}",
+        "Lens: {{camera lens:uppercase}}",
         [
             {"camera lens": "  hello  "},
         ],
@@ -714,6 +782,38 @@ def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_i
     }
 
 
+def test_mustache_variables_node_renders_yaml_against_variable_list_input_trims_by_default():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables(
+        "subject_identity:\n"
+        "  - {{animal}}\n",
+        [
+            {"animal": "  FOX  "},
+        ],
+    )
+
+    assert variables == {
+        "subject_identity": ["FOX"],
+    }
+
+
+def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_notrim_setting():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables(
+        "subject_identity:\n"
+        "  - {{animal:notrim}}\n",
+        [
+            {"animal": "  FOX  "},
+        ],
+    )
+
+    assert variables == {
+        "subject_identity": ["  FOX  "],
+    }
+
+
 def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_lowercase_setting():
     node = MustacheVariables()
 
@@ -762,22 +862,6 @@ def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_u
     }
 
 
-def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_trim_setting():
-    node = MustacheVariables()
-
-    (variables,) = node.parse_variables(
-        "subject_identity:\n"
-        "  - {{animal:trim}}\n",
-        [
-            {"animal": "  fox  "},
-        ],
-    )
-
-    assert variables == {
-        "subject_identity": ["fox"],
-    }
-
-
 def test_mustache_variables_node_expands_local_references_after_input_rendering():
     node = MustacheVariables()
 
@@ -786,14 +870,14 @@ def test_mustache_variables_node_expands_local_references_after_input_rendering(
         "  - {{animal}}-brown\n"
         "  - {{animal}}-black\n"
         "hairstyle:\n"
-        "  - {{color}} hair\n",
+        "  - {{color:static}} hair\n",
         [
             {"animal": "fox"},
         ],
     )
 
     assert variables["color"] == ["fox-brown", "fox-black"]
-    assert variables["hairstyle"] == ["{{color}} hair"]
+    assert variables["hairstyle"] == ["{{color:static}} hair"]
 
     sampled = sample_mustache_variable_list(
         variables,
