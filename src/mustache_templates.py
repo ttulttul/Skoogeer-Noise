@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 MustacheVariablesDict = Dict[str, List[str]]
 MustacheVariableList = List[Dict[str, str]]
-CompiledMustacheTemplate = tuple[str, List[str], Dict[str, str], Dict[str, str]]
+TemplateInstanceSettings = tuple[str, ...]
+CompiledMustacheTemplate = tuple[str, List[str], Dict[str, str], Dict[str, TemplateInstanceSettings]]
 
 _SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
 _DEFAULT_VARIABLES_YAML = (
@@ -38,7 +39,9 @@ _VARIABLE_TEMPLATE_SPECS_KEY = "__mustache_template_specs__"
 _WEIGHTED_VALUE_PATTERN = re.compile(r"^(.*?):([0-9]*\.?[0-9]+)\s*$")
 _WEIGHT_TOLERANCE = 1e-6
 _RESERVED_VARIABLE_KEYS = {_VARIABLE_WEIGHTS_KEY, _VARIABLE_TEMPLATE_SPECS_KEY}
-_TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize", "lowercase"}
+_TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize", "lowercase", "propercase", "uppercase", "trim"}
+_TEMPLATE_SELECTION_SETTINGS = {"repeat", "randomize"}
+_TEMPLATE_CASE_SETTINGS = {"lowercase", "propercase", "uppercase"}
 
 
 def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
@@ -267,7 +270,7 @@ def _compile_local_template_value(
     variable_name: str,
     variables: MustacheVariablesDict,
 ) -> CompiledMustacheTemplate | None:
-    compiled_format, referenced_variables, field_name_to_variable, field_name_to_setting = _compile_mustache_template(template_text)
+    compiled_format, referenced_variables, field_name_to_variable, field_name_to_settings = _compile_mustache_template(template_text)
     if not referenced_variables:
         return None
 
@@ -278,7 +281,7 @@ def _compile_local_template_value(
             f"Mustache variable '{variable_name}' references undefined variables: {', '.join(sorted(missing))}. "
             "Local template references must be defined in the same YAML or supplied through the input variables."
         )
-    return compiled_format, referenced_variables, field_name_to_variable, field_name_to_setting
+    return compiled_format, referenced_variables, field_name_to_variable, field_name_to_settings
 
 
 def _parse_variable_values(
@@ -598,35 +601,48 @@ def render_mustache_yaml_inputs(
 
 
 def _render_yaml_input_placeholder(reference_text: str, mapping: Dict[str, str]) -> str:
-    variable_name, setting = _parse_template_variable_reference(reference_text)
+    variable_name, settings = _parse_template_variable_reference(reference_text)
     if variable_name not in mapping:
         return "{{" + reference_text + "}}"
-    return _apply_template_instance_setting(mapping[variable_name], setting)
+    return _apply_template_instance_settings(mapping[variable_name], settings)
 
 
-def _apply_template_instance_setting(value: str, setting: str | None) -> str:
-    if setting == "lowercase":
-        return str(value).lower()
-    return str(value)
+def _apply_template_instance_settings(value: str, settings: TemplateInstanceSettings) -> str:
+    text = str(value)
+    for setting in settings:
+        if setting in _TEMPLATE_SELECTION_SETTINGS:
+            continue
+        if setting == "lowercase":
+            text = text.lower()
+            continue
+        if setting == "propercase":
+            text = text[:1].upper() + text[1:]
+            continue
+        if setting == "uppercase":
+            text = text.upper()
+            continue
+        if setting == "trim":
+            text = text.strip()
+    return text
 
 
 class _FormatMapView:
-    __slots__ = ("variables", "field_name_to_variable", "field_name_to_setting")
+    __slots__ = ("variables", "field_name_to_variable", "field_name_to_settings")
 
     def __init__(
         self,
         variables: Dict[str, str],
         field_name_to_variable: Dict[str, str],
-        field_name_to_setting: Dict[str, str],
+        field_name_to_settings: Dict[str, TemplateInstanceSettings],
     ):
         self.variables = variables
         self.field_name_to_variable = field_name_to_variable
-        self.field_name_to_setting = field_name_to_setting
+        self.field_name_to_settings = field_name_to_settings
 
     def __getitem__(self, field_name: str) -> str:
         variable_name = self.field_name_to_variable.get(field_name, field_name)
-        setting = self.field_name_to_setting.get(field_name)
-        return _apply_template_instance_setting(self.variables[variable_name], setting)
+        settings = self.field_name_to_settings.get(field_name, ())
+        return _apply_template_instance_settings(self.variables[variable_name], settings)
 
 
 class _LazyFormatMapView:
@@ -634,7 +650,7 @@ class _LazyFormatMapView:
         "root_variables",
         "resolved_variables",
         "field_name_to_variable",
-        "field_name_to_setting",
+        "field_name_to_settings",
         "rng",
         "repeated_choices",
     )
@@ -644,53 +660,48 @@ class _LazyFormatMapView:
         root_variables: MustacheVariablesDict,
         resolved_variables: Dict[str, str],
         field_name_to_variable: Dict[str, str],
-        field_name_to_setting: Dict[str, str],
+        field_name_to_settings: Dict[str, TemplateInstanceSettings],
         rng: random.Random,
     ):
         self.root_variables = root_variables
         self.resolved_variables = resolved_variables
         self.field_name_to_variable = field_name_to_variable
-        self.field_name_to_setting = field_name_to_setting
+        self.field_name_to_settings = field_name_to_settings
         self.rng = rng
         self.repeated_choices: Dict[str, str] = {}
 
     def __getitem__(self, field_name: str) -> str:
         variable_name = self.field_name_to_variable.get(field_name, field_name)
-        setting = self.field_name_to_setting.get(field_name)
+        settings = self.field_name_to_settings.get(field_name, ())
+        selection_settings = [setting for setting in settings if setting in _TEMPLATE_SELECTION_SETTINGS]
+        selection_setting = selection_settings[0] if selection_settings else None
 
-        if setting == "randomize":
-            value = _choose_random_lazy_variable_value(
+        if selection_setting == "randomize":
+            raw_value = _choose_random_lazy_variable_value(
                 variable_name,
                 variables=self.root_variables,
                 resolved_variables=self.resolved_variables,
                 rng=self.rng,
             )
-            self.repeated_choices[variable_name] = value
-            return value
-
-        if setting == "repeat":
+        elif selection_setting == "repeat":
             if variable_name in self.repeated_choices:
-                return self.repeated_choices[variable_name]
-            if variable_name in self.resolved_variables:
-                value = self.resolved_variables[variable_name]
-                self.repeated_choices[variable_name] = value
-                return value
-            value = _choose_random_lazy_variable_value(
-                variable_name,
-                variables=self.root_variables,
-                resolved_variables=self.resolved_variables,
-                rng=self.rng,
-            )
-            self.repeated_choices[variable_name] = value
-            return value
+                raw_value = self.repeated_choices[variable_name]
+            elif variable_name in self.resolved_variables:
+                raw_value = self.resolved_variables[variable_name]
+            else:
+                raw_value = _choose_random_lazy_variable_value(
+                    variable_name,
+                    variables=self.root_variables,
+                    resolved_variables=self.resolved_variables,
+                    rng=self.rng,
+                )
+        else:
+            if variable_name not in self.resolved_variables:
+                raise KeyError(variable_name)
+            raw_value = self.resolved_variables[variable_name]
 
-        if variable_name not in self.resolved_variables:
-            raise KeyError(variable_name)
-
-        value = self.resolved_variables[variable_name]
-        transformed_value = _apply_template_instance_setting(value, setting)
-        self.repeated_choices[variable_name] = transformed_value
-        return transformed_value
+        self.repeated_choices[variable_name] = raw_value
+        return _apply_template_instance_settings(raw_value, settings)
 
 
 def _escape_format_literal(text: str) -> str:
@@ -716,44 +727,73 @@ def _find_last_unescaped_colon(text: str) -> int:
     return last_colon_index
 
 
-def _parse_template_variable_reference(reference_text: str) -> tuple[str, str | None]:
+def _normalize_template_instance_settings(settings_text: str) -> TemplateInstanceSettings:
+    raw_settings = [part.strip().lower() for part in settings_text.split(",")]
+    normalized_settings = [setting for setting in raw_settings if setting]
+    if not normalized_settings:
+        return ()
+
+    unknown_settings = [setting for setting in normalized_settings if setting not in _TEMPLATE_INSTANCE_SETTINGS]
+    if unknown_settings:
+        raise ValueError(
+            f"Unsupported mustache instance setting '{unknown_settings[0]}'. "
+            f"Expected one of {tuple(sorted(_TEMPLATE_INSTANCE_SETTINGS))}."
+        )
+
+    duplicates = [setting for setting in normalized_settings if normalized_settings.count(setting) > 1]
+    if duplicates:
+        raise ValueError(f"Duplicate mustache instance setting '{duplicates[0]}' is not allowed.")
+
+    selection_settings = [setting for setting in normalized_settings if setting in _TEMPLATE_SELECTION_SETTINGS]
+    if len(selection_settings) > 1:
+        raise ValueError(
+            "Mustache instance settings cannot combine multiple selection actions: "
+            f"{', '.join(selection_settings)}."
+        )
+
+    case_settings = [setting for setting in normalized_settings if setting in _TEMPLATE_CASE_SETTINGS]
+    if len(case_settings) > 1:
+        raise ValueError(
+            "Mustache instance settings cannot combine multiple case transforms: "
+            f"{', '.join(case_settings)}."
+        )
+
+    return tuple(normalized_settings)
+
+
+def _parse_template_variable_reference(reference_text: str) -> tuple[str, TemplateInstanceSettings]:
     stripped_reference = str(reference_text).strip()
     split_index = _find_last_unescaped_colon(stripped_reference)
     variable_text = stripped_reference
-    setting = None
+    settings: TemplateInstanceSettings = ()
 
     if split_index >= 0:
-        maybe_setting = stripped_reference[split_index + 1 :].strip().lower()
+        maybe_setting = stripped_reference[split_index + 1 :].strip()
         if maybe_setting:
-            if maybe_setting not in _TEMPLATE_INSTANCE_SETTINGS:
-                raise ValueError(
-                    f"Unsupported mustache instance setting '{maybe_setting}'. "
-                    f"Expected one of {tuple(sorted(_TEMPLATE_INSTANCE_SETTINGS))}."
-                )
             variable_text = stripped_reference[:split_index]
-            setting = maybe_setting
+            settings = _normalize_template_instance_settings(maybe_setting)
 
     variable_name = variable_text.replace("\\:", ":").strip()
     if not variable_name:
         raise ValueError("Mustache template variable names must be non-empty.")
-    return variable_name, setting
+    return variable_name, settings
 
 
-def _compile_mustache_template(template_text: str) -> tuple[str, List[str], Dict[str, str], Dict[str, str]]:
+def _compile_mustache_template(template_text: str) -> tuple[str, List[str], Dict[str, str], Dict[str, TemplateInstanceSettings]]:
     format_parts: List[str] = []
     referenced_variables: List[str] = []
     field_name_to_variable: Dict[str, str] = {}
-    field_name_to_setting: Dict[str, str] = {}
+    field_name_to_settings: Dict[str, TemplateInstanceSettings] = {}
     field_name_by_variable: Dict[str, str] = {}
     last_index = 0
     synthetic_field_index = 0
 
     for match in _MUSTACHE_VARIABLE_PATTERN.finditer(template_text):
         format_parts.append(_escape_format_literal(template_text[last_index:match.start()]))
-        variable_name, setting = _parse_template_variable_reference(match.group(1))
+        variable_name, settings = _parse_template_variable_reference(match.group(1))
         if variable_name not in referenced_variables:
             referenced_variables.append(variable_name)
-        if setting is None:
+        if not settings:
             if variable_name not in field_name_by_variable:
                 if _can_use_direct_format_field(variable_name):
                     field_name = variable_name
@@ -769,14 +809,14 @@ def _compile_mustache_template(template_text: str) -> tuple[str, List[str], Dict
             field_name = f"mustache_{synthetic_field_index}"
             synthetic_field_index += 1
             field_name_to_variable[field_name] = variable_name
-            field_name_to_setting[field_name] = setting
+            field_name_to_settings[field_name] = settings
             format_parts.append("{")
             format_parts.append(field_name)
             format_parts.append("}")
         last_index = match.end()
 
     format_parts.append(_escape_format_literal(template_text[last_index:]))
-    return "".join(format_parts), referenced_variables, field_name_to_variable, field_name_to_setting
+    return "".join(format_parts), referenced_variables, field_name_to_variable, field_name_to_settings
 
 
 def extract_template_variables(template: str) -> List[str]:
@@ -827,18 +867,18 @@ def _resolve_sample_count(total_permutations: int, normalized_limit: int | None,
 def _render_compiled_template(
     compiled_format: str,
     field_name_to_variable: Dict[str, str],
-    field_name_to_setting: Dict[str, str],
+    field_name_to_settings: Dict[str, TemplateInstanceSettings],
     mapping: Dict[str, str],
 ) -> str:
-    if not field_name_to_variable and not field_name_to_setting:
+    if not field_name_to_variable and not field_name_to_settings:
         return compiled_format.format_map(mapping)
-    return compiled_format.format_map(_FormatMapView(mapping, field_name_to_variable, field_name_to_setting))
+    return compiled_format.format_map(_FormatMapView(mapping, field_name_to_variable, field_name_to_settings))
 
 
 def _render_lazy_compiled_template(
     compiled_format: str,
     field_name_to_variable: Dict[str, str],
-    field_name_to_setting: Dict[str, str],
+    field_name_to_settings: Dict[str, TemplateInstanceSettings],
     *,
     variables: MustacheVariablesDict,
     resolved_variables: Dict[str, str],
@@ -849,7 +889,7 @@ def _render_lazy_compiled_template(
             variables,
             resolved_variables,
             field_name_to_variable,
-            field_name_to_setting,
+            field_name_to_settings,
             rng,
         )
     )
@@ -1051,12 +1091,12 @@ def _render_lazy_variable_value(
         if template_spec is None:
             return raw_value
 
-    compiled_format, _, field_name_to_variable, field_name_to_setting = template_spec
+    compiled_format, _, field_name_to_variable, field_name_to_settings = template_spec
     try:
         return _render_lazy_compiled_template(
             compiled_format,
             field_name_to_variable,
-            field_name_to_setting,
+            field_name_to_settings,
             variables=variables,
             resolved_variables=resolved_variables,
             rng=rng,
@@ -1201,7 +1241,7 @@ def render_mustache_template_list(
     variable_list: MustacheVariableList,
 ) -> List[str]:
     template_text = str(template)
-    compiled_format, referenced_variables, field_name_to_variable, field_name_to_setting = _compile_mustache_template(template_text)
+    compiled_format, referenced_variables, field_name_to_variable, field_name_to_settings = _compile_mustache_template(template_text)
 
     if not variable_list:
         logger.debug("Mustache template received an empty variable list; returning no outputs.")
@@ -1222,7 +1262,7 @@ def render_mustache_template_list(
             )
         try:
             rendered_outputs.append(
-                _render_compiled_template(compiled_format, field_name_to_variable, field_name_to_setting, variables)
+                _render_compiled_template(compiled_format, field_name_to_variable, field_name_to_settings, variables)
             )
         except KeyError:
             missing = [name for name in referenced_variables if name not in variables]
