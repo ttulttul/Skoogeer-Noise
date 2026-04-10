@@ -50,6 +50,18 @@ def _visible_mustache_variable_keys(variables: MustacheVariablesDict) -> List[st
     return [key for key in variables.keys() if key != _VARIABLE_WEIGHTS_KEY]
 
 
+def _find_unresolved_mustache_variables(text: str) -> List[str]:
+    return extract_template_variables(str(text))
+
+
+def _raise_for_unresolved_mustache_variables(text: str, *, context: str) -> None:
+    unresolved = _find_unresolved_mustache_variables(text)
+    if unresolved:
+        raise ValueError(
+            f"{context} contains unresolved mustache variables: {', '.join(sorted(unresolved))}."
+        )
+
+
 def _mustache_weight_mapping(variables: MustacheVariablesDict) -> Dict[str, List[float]]:
     raw_weights = variables.get(_VARIABLE_WEIGHTS_KEY)
     if raw_weights is None:
@@ -119,9 +131,23 @@ def _append_parsed_variable_values(
             raise ValueError(
                 f"Mustache variable '{variable_name}' cannot be merged across multiple definitions when weighted values are in use."
             )
+        for value in values:
+            _raise_for_unresolved_mustache_variables(
+                value,
+                context=f"Mustache variable '{variable_name}' value",
+            )
         variables[variable_name].extend(str(value) for value in values)
         return
 
+    _raise_for_unresolved_mustache_variables(
+        variable_name,
+        context="Mustache variable name",
+    )
+    for value in values:
+        _raise_for_unresolved_mustache_variables(
+            value,
+            context=f"Mustache variable '{variable_name}' value",
+        )
     variables[variable_name] = [str(value) for value in values]
     _set_variable_weights(variables, variable_name, weights)
 
@@ -290,6 +316,10 @@ def _merge_parsed_mustache_variables(parsed, *, variables: MustacheVariablesDict
             raise ValueError("Mustache variable names must be non-empty.")
         if key == _VARIABLE_WEIGHTS_KEY:
             raise ValueError(f"Mustache variable name '{_VARIABLE_WEIGHTS_KEY}' is reserved.")
+        _raise_for_unresolved_mustache_variables(
+            key,
+            context="Mustache variable name",
+        )
 
         values, weights = _parse_variable_values(raw_values, variable_name=key, variables=variables)
         _append_parsed_variable_values(variables, variable_name=key, values=values, weights=weights)
