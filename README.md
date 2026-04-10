@@ -442,10 +442,10 @@ hairstyle:
 - Empty input returns an empty variable set.
 - When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
 - If `variables` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used to render it first.
-- That pre-render is now partial: placeholders satisfied by the upstream `variables` input are rendered first, while unresolved placeholders are left in place for the top-down local-YAML expansion pass.
+- That pre-render is now partial: placeholders satisfied by the upstream `variables` input are rendered first, while unresolved placeholders are left in place for the later lazy local-reference pass.
 - This is the intended way to chain stages such as `Mustache Variables -> Mustache Variable Sampler -> Reorder List -> Mustache Variables`.
 - Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
-- Variable values may reference variables defined earlier in the same YAML. Those earlier values are expanded in top-to-bottom order, so derived entries like `{{color}} hair` are materialized during parsing.
+- Variable values may reference variables defined earlier in the same YAML. Those references are validated in top-to-bottom order, but they stay lazy inside `MUSTACHE_VARIABLES` and are only rendered when `Mustache Variable Sampler` synthesizes concrete settings.
 - Local template references must point to variables defined earlier in the YAML or to values supplied through the optional `variables` input. Referencing a later variable raises an error.
 - Random weights can be attached to a variable value by appending `:probability` to the end of the scalar, for example `black:0.4`.
 - When any value for a variable uses a `:probability` suffix, every value for that variable must use one, and the probabilities for that variable must sum to `1.0`.
@@ -473,6 +473,7 @@ Expands a `MUSTACHE_VARIABLES` mapping into a `MUSTACHE_VARIABLE_LIST`, where ea
 ##### Notes
 
 - This node now owns permutation generation, so large Cartesian products can be capped before `Mustache Template` runs.
+- Locally derived YAML values from `Mustache Variables` also expand here, not during YAML parsing, so sampler `limit` is now the place where recursive/local variable explosions are controlled.
 - In `random` mode, the sampler does not merely shuffle value lists. It randomizes key order, value order, and the emitted permutation order so the resulting `MUSTACHE_VARIABLE_LIST` is a seeded random subset/permutation of the full space.
 - When a variable value list carries `:probability` metadata from `Mustache Variables`, random sampling uses those probabilities instead of assuming a uniform distribution.
 - Weighted random sampling still emits unique concrete settings. For moderate product sizes it does exact weighted sampling without replacement; for huge spaces it falls back to repeated weighted draws with duplicate rejection.

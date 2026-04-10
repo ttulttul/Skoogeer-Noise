@@ -94,16 +94,37 @@ def test_parse_mustache_variables_yaml_expands_local_references_defined_above():
         "  - {{color}} hair in a {{hairarrangement}}\n"
     )
 
-    assert variables == {
-        "color": ["brown", "blue"],
-        "hairarrangement": ["ponytail", "bun"],
-        "hairstyle": [
-            "brown hair in a ponytail",
-            "brown hair in a bun",
-            "blue hair in a ponytail",
-            "blue hair in a bun",
-        ],
-    }
+    assert variables["color"] == ["brown", "blue"]
+    assert variables["hairarrangement"] == ["ponytail", "bun"]
+    assert variables["hairstyle"] == ["{{color}} hair in a {{hairarrangement}}"]
+
+    sampled = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        limit=-1,
+    )
+    assert sampled == [
+        {
+            "color": "brown",
+            "hairarrangement": "ponytail",
+            "hairstyle": "brown hair in a ponytail",
+        },
+        {
+            "color": "brown",
+            "hairarrangement": "bun",
+            "hairstyle": "brown hair in a bun",
+        },
+        {
+            "color": "blue",
+            "hairarrangement": "ponytail",
+            "hairstyle": "blue hair in a ponytail",
+        },
+        {
+            "color": "blue",
+            "hairarrangement": "bun",
+            "hairstyle": "blue hair in a bun",
+        },
+    ]
 
 
 def test_parse_mustache_variables_yaml_rejects_local_references_to_later_variables():
@@ -425,10 +446,18 @@ def test_mustache_variables_node_expands_local_references_after_input_rendering(
         ],
     )
 
-    assert variables == {
-        "color": ["fox-brown", "fox-black"],
-        "hairstyle": ["fox-brown hair", "fox-black hair"],
-    }
+    assert variables["color"] == ["fox-brown", "fox-black"]
+    assert variables["hairstyle"] == ["{{color}} hair"]
+
+    sampled = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        limit=-1,
+    )
+    assert sampled == [
+        {"color": "fox-brown", "hairstyle": "fox-brown hair"},
+        {"color": "fox-black", "hairstyle": "fox-black hair"},
+    ]
 
 
 def test_mustache_variables_node_accepts_nested_variable_list_wrappers():
