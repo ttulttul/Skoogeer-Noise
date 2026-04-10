@@ -201,7 +201,7 @@ def test_extract_template_variables_preserves_first_appearance_order():
 
 def test_extract_template_variables_ignores_instance_settings_and_unescapes_colons():
     variables = extract_template_variables(
-        "A {{haircolor:randomize}} coat, {{haircolor:repeat}}, and {{camera\\:lens}}."
+        "A {{haircolor:randomize}} coat, {{haircolor:repeat}}, {{haircolor:lowercase}}, and {{camera\\:lens}}."
     )
 
     assert variables == ["haircolor", "camera:lens"]
@@ -352,6 +352,25 @@ def test_sample_mustache_variable_list_supports_randomize_and_repeat_settings():
         assert left == right
 
 
+def test_sample_mustache_variable_list_supports_lowercase_setting():
+    variables = parse_mustache_variables_yaml(
+        "TitleCase:\n"
+        "  - Golden Hour\n"
+        "label:\n"
+        "  - {{TitleCase:lowercase}}\n"
+    )
+
+    sampled = sample_mustache_variable_list(
+        variables,
+        sampling_mode="sequential",
+        limit=-1,
+    )
+
+    assert sampled == [
+        {"TitleCase": "Golden Hour", "label": "golden hour"},
+    ]
+
+
 def test_sample_mustache_variable_list_random_preserves_lazy_dependency_order():
     variables = parse_mustache_variables_yaml(
         "body_type2:\n"
@@ -457,6 +476,17 @@ def test_render_mustache_template_list_supports_variable_names_with_spaces():
     assert rendered == ["Lens: 35mm"]
 
 
+def test_render_mustache_template_list_supports_lowercase_setting():
+    rendered = render_mustache_template_list(
+        "Lens: {{camera lens:lowercase}}",
+        [
+            {"camera lens": "35MM"},
+        ],
+    )
+
+    assert rendered == ["Lens: 35mm"]
+
+
 def test_render_mustache_template_list_repeats_plain_text_for_each_setting():
     rendered = render_mustache_template_list(
         "plain text",
@@ -529,6 +559,22 @@ def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_i
         "  - {{animal:repeat}}\n",
         [
             {"animal": "fox"},
+        ],
+    )
+
+    assert variables == {
+        "subject_identity": ["fox"],
+    }
+
+
+def test_mustache_variables_node_renders_yaml_against_variable_list_input_with_lowercase_setting():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables(
+        "subject_identity:\n"
+        "  - {{animal:lowercase}}\n",
+        [
+            {"animal": "FOX"},
         ],
     )
 

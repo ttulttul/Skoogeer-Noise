@@ -38,7 +38,7 @@ _VARIABLE_TEMPLATE_SPECS_KEY = "__mustache_template_specs__"
 _WEIGHTED_VALUE_PATTERN = re.compile(r"^(.*?):([0-9]*\.?[0-9]+)\s*$")
 _WEIGHT_TOLERANCE = 1e-6
 _RESERVED_VARIABLE_KEYS = {_VARIABLE_WEIGHTS_KEY, _VARIABLE_TEMPLATE_SPECS_KEY}
-_TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize"}
+_TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize", "lowercase"}
 
 
 def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
@@ -590,22 +590,43 @@ def render_mustache_yaml_inputs(
                 )
             rendered_inputs.append(
                 _MUSTACHE_VARIABLE_PATTERN.sub(
-                    lambda match: mapping.get(_parse_template_variable_reference(match.group(1))[0], match.group(0)),
+                    lambda match: _render_yaml_input_placeholder(match.group(1), mapping),
                     template_text,
                 )
             )
     return rendered_inputs
 
 
-class _FormatMapView:
-    __slots__ = ("variables", "field_name_to_variable")
+def _render_yaml_input_placeholder(reference_text: str, mapping: Dict[str, str]) -> str:
+    variable_name, setting = _parse_template_variable_reference(reference_text)
+    if variable_name not in mapping:
+        return "{{" + reference_text + "}}"
+    return _apply_template_instance_setting(mapping[variable_name], setting)
 
-    def __init__(self, variables: Dict[str, str], field_name_to_variable: Dict[str, str]):
+
+def _apply_template_instance_setting(value: str, setting: str | None) -> str:
+    if setting == "lowercase":
+        return str(value).lower()
+    return str(value)
+
+
+class _FormatMapView:
+    __slots__ = ("variables", "field_name_to_variable", "field_name_to_setting")
+
+    def __init__(
+        self,
+        variables: Dict[str, str],
+        field_name_to_variable: Dict[str, str],
+        field_name_to_setting: Dict[str, str],
+    ):
         self.variables = variables
         self.field_name_to_variable = field_name_to_variable
+        self.field_name_to_setting = field_name_to_setting
 
     def __getitem__(self, field_name: str) -> str:
-        return self.variables[self.field_name_to_variable.get(field_name, field_name)]
+        variable_name = self.field_name_to_variable.get(field_name, field_name)
+        setting = self.field_name_to_setting.get(field_name)
+        return _apply_template_instance_setting(self.variables[variable_name], setting)
 
 
 class _LazyFormatMapView:
@@ -667,8 +688,9 @@ class _LazyFormatMapView:
             raise KeyError(variable_name)
 
         value = self.resolved_variables[variable_name]
-        self.repeated_choices[variable_name] = value
-        return value
+        transformed_value = _apply_template_instance_setting(value, setting)
+        self.repeated_choices[variable_name] = transformed_value
+        return transformed_value
 
 
 def _escape_format_literal(text: str) -> str:
@@ -805,11 +827,12 @@ def _resolve_sample_count(total_permutations: int, normalized_limit: int | None,
 def _render_compiled_template(
     compiled_format: str,
     field_name_to_variable: Dict[str, str],
+    field_name_to_setting: Dict[str, str],
     mapping: Dict[str, str],
 ) -> str:
-    if not field_name_to_variable:
+    if not field_name_to_variable and not field_name_to_setting:
         return compiled_format.format_map(mapping)
-    return compiled_format.format_map(_FormatMapView(mapping, field_name_to_variable))
+    return compiled_format.format_map(_FormatMapView(mapping, field_name_to_variable, field_name_to_setting))
 
 
 def _render_lazy_compiled_template(
@@ -1178,7 +1201,7 @@ def render_mustache_template_list(
     variable_list: MustacheVariableList,
 ) -> List[str]:
     template_text = str(template)
-    compiled_format, referenced_variables, field_name_to_variable, _ = _compile_mustache_template(template_text)
+    compiled_format, referenced_variables, field_name_to_variable, field_name_to_setting = _compile_mustache_template(template_text)
 
     if not variable_list:
         logger.debug("Mustache template received an empty variable list; returning no outputs.")
@@ -1199,7 +1222,7 @@ def render_mustache_template_list(
             )
         try:
             rendered_outputs.append(
-                _render_compiled_template(compiled_format, field_name_to_variable, variables)
+                _render_compiled_template(compiled_format, field_name_to_variable, field_name_to_setting, variables)
             )
         except KeyError:
             missing = [name for name in referenced_variables if name not in variables]

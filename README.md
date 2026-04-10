@@ -460,8 +460,8 @@ pair:
 - Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
 - Variable values may reference any other variable defined in the same YAML, regardless of source order. Those references stay lazy inside `MUSTACHE_VARIABLES` and are only rendered when `Mustache Variable Sampler` synthesizes concrete settings.
 - Local template references must point to variables defined somewhere in the same YAML or to values supplied through the optional `variables` input. Referencing a missing variable raises an error.
-- Placeholder instance settings are written inside the mustache expression, such as `{{color:randomize}}` or `{{color:repeat}}`. Escape a literal colon in the variable name as `\:` if needed.
-- `randomize` draws a fresh seeded random value from that variable's full value list during lazy rendering. `repeat` reuses the most recent value chosen for that variable earlier in the same lazy template render, falling back to the current resolved value when there is one.
+- Placeholder instance settings are written inside the mustache expression, such as `{{color:randomize}}`, `{{color:repeat}}`, or `{{color:lowercase}}`. Escape a literal colon in the variable name as `\:` if needed.
+- `randomize` draws a fresh seeded random value from that variable's full value list during lazy rendering. `repeat` reuses the most recent value chosen for that variable earlier in the same lazy template render, falling back to the current resolved value when there is one. `lowercase` lowercases the filled-in value after lookup.
 - Random weights can be attached to a variable value by appending `:probability` to the end of the scalar, for example `black:0.4`.
 - When any value for a variable uses a `:probability` suffix, every value for that variable must use one, and the probabilities for that variable must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
