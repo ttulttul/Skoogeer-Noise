@@ -8,6 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.latent_channel_space_ops import (  # noqa: E402
+    LatentChannelMatch,
     LatentChannelLinearTransform,
     LatentChannelMerge,
     LatentChannelNonlinearTransform,
@@ -225,6 +226,106 @@ def test_latent_channel_merge_top_variance_selection_count():
 
     expected = dest_samples.clone()
     expected[:, 1] = source_samples[:, 1]
+    assert torch.allclose(out["samples"], expected)
+
+
+def test_latent_channel_match_transfers_reference_channel_stats():
+    target_samples = torch.tensor(
+        [[
+            [[0.0, 1.0], [2.0, 3.0]],
+            [[10.0, 12.0], [14.0, 16.0]],
+        ]],
+        dtype=torch.float32,
+    )
+    reference_samples = torch.tensor(
+        [[
+            [[100.0, 100.0], [100.0, 100.0]],
+            [[0.0, 2.0], [4.0, 6.0]],
+        ]],
+        dtype=torch.float32,
+    )
+
+    node = LatentChannelMatch()
+    (out,) = node.match(
+        target={"samples": target_samples.clone(), "noise_mask": torch.ones(1, 2, 2)},
+        reference={"samples": reference_samples},
+        mix=1.0,
+    )
+
+    out_means = out["samples"].mean(dim=(0, 2, 3))
+    out_stds = out["samples"].std(dim=(0, 2, 3), unbiased=False)
+    ref_means = reference_samples.mean(dim=(0, 2, 3))
+    ref_stds = reference_samples.std(dim=(0, 2, 3), unbiased=False)
+
+    assert torch.allclose(out_means, ref_means, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(out_stds, ref_stds, atol=1e-5, rtol=1e-5)
+    assert torch.equal(out["noise_mask"], torch.ones(1, 2, 2))
+
+
+def test_latent_channel_match_broadcasts_single_reference_sample():
+    target_samples = torch.tensor(
+        [
+            [
+                [[0.0, 1.0], [2.0, 3.0]],
+                [[4.0, 5.0], [6.0, 7.0]],
+            ],
+            [
+                [[8.0, 9.0], [10.0, 11.0]],
+                [[12.0, 13.0], [14.0, 15.0]],
+            ],
+        ],
+        dtype=torch.float32,
+    )
+    reference_samples = torch.tensor(
+        [[
+            [[20.0, 22.0], [24.0, 26.0]],
+            [[100.0, 100.0], [100.0, 100.0]],
+        ]],
+        dtype=torch.float32,
+    )
+
+    node = LatentChannelMatch()
+    (out,) = node.match(
+        target={"samples": target_samples.clone()},
+        reference={"samples": reference_samples},
+        mix=1.0,
+    )
+
+    ref_means = reference_samples.mean(dim=(0, 2, 3))
+    ref_stds = reference_samples.std(dim=(0, 2, 3), unbiased=False)
+    out_means = out["samples"].mean(dim=(2, 3))
+    out_stds = out["samples"].std(dim=(2, 3), unbiased=False)
+
+    assert torch.allclose(out_means[0], ref_means, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(out_means[1], ref_means, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(out_stds[0], ref_stds, atol=1e-5, rtol=1e-5)
+    assert torch.allclose(out_stds[1], ref_stds, atol=1e-5, rtol=1e-5)
+
+
+def test_latent_channel_match_respects_mix_and_mask():
+    target_samples = torch.tensor(
+        [[[[0.0, 2.0], [4.0, 6.0]]]],
+        dtype=torch.float32,
+    )
+    reference_samples = torch.tensor(
+        [[[[10.0, 10.0], [10.0, 10.0]]]],
+        dtype=torch.float32,
+    )
+    mask = torch.tensor([[[1.0, 0.0], [1.0, 0.0]]], dtype=torch.float32)
+
+    node = LatentChannelMatch()
+    (out,) = node.match(
+        target={"samples": target_samples.clone()},
+        reference={"samples": reference_samples},
+        mix=0.5,
+        mask=mask,
+    )
+
+    fully_matched = torch.full_like(target_samples, 10.0)
+    mixed = target_samples + (fully_matched - target_samples) * 0.5
+    expected = target_samples.clone()
+    expected[:, :, :, 0] = mixed[:, :, :, 0]
+
     assert torch.allclose(out["samples"], expected)
 
 

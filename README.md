@@ -160,6 +160,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Latent Channel Linear Transform](#latent-channel-linear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Nonlinear Transform](#latent-channel-nonlinear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Merge](#latent-channel-merge) | `latent/channel` | `LATENT` |
+| [Latent Channel Match](#latent-channel-match) | `latent/channel` | `LATENT` |
 | [Latent Packed Slot Transform](#latent-packed-slot-transform) | `latent/channel` | `LATENT` |
 | [Latent Gaussian Blur](#latent-gaussian-blur) | `Latent/Filter` | `LATENT` |
 | [Latent Frequency Split](#latent-frequency-split) | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
@@ -778,6 +779,31 @@ Blends selected channels from a **source** latent into a **destination** latent.
 | `selection_indices` | `STRING` | `""` | – | Comma-separated indices when `selection_mode=indices`. |
 | `blend_strength` | `FLOAT` | `1.0` | `-4.0..4.0` | Blend factor for selected channels (`0` keeps destination, `1` uses source, values outside `[0,1]` extrapolate). |
 | `mask` | `MASK` | – | – | Optional mask to limit the merge. |
+
+---
+
+#### Latent Channel Match
+
+Transfers the **per-channel mean and standard deviation** from a **reference** latent onto a **target** latent, similar to a color-match operation but performed directly in latent space.
+
+- **Menu category:** `latent/channel`
+- **Returns:** `LATENT`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `target` | `LATENT` | – | – | Latent whose channels will be normalized to match the reference statistics. |
+| `reference` | `LATENT` | – | – | Latent providing the per-channel mean/std to transfer. |
+| `mix` | `FLOAT` | `1.0` | `0.0..1.0` | Blend factor between the original target and the fully matched result. |
+| `mask` | `MASK` | – | – | Optional mask to limit the matched result spatially. |
+
+##### Notes
+
+- Matching is done independently per channel using the reference channel mean/std and the target channel mean/std.
+- The reference latent can either flatten to one sample or to the same flattened sample count as the target. A single reference sample broadcasts across the target batch.
+- Spatial sizes may differ between reference and target because only channel statistics are transferred.
+- This is useful for latent-space “palette transfer” or for normalizing one latent toward another latent’s overall channel distribution before downstream blending or decoding.
 
 ---
 

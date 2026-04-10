@@ -209,6 +209,41 @@ def _match_channel_stats(original: torch.Tensor, modified: torch.Tensor) -> torc
     return (modified - mod_mean) * (orig_std / mod_std) + orig_mean
 
 
+def _channel_mean_std_nchw(samples: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    stats = samples.float()
+    means = stats.mean(dim=(2, 3), keepdim=True)
+    stds = stats.std(dim=(2, 3), unbiased=False, keepdim=True).clamp_min(_EPS)
+    return means, stds
+
+
+def _match_latent_channel_stats(reference: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    if reference.ndim != 4 or target.ndim != 4:
+        raise ValueError(
+            f"Expected NCHW tensors for channel matching, got reference={tuple(reference.shape)} target={tuple(target.shape)}."
+        )
+    if int(reference.shape[1]) != int(target.shape[1]):
+        raise ValueError(
+            "Reference and target latents must have the same channel count for channel matching; "
+            f"got {int(reference.shape[1])} vs {int(target.shape[1])}."
+        )
+    if int(reference.shape[0]) not in (1, int(target.shape[0])):
+        raise ValueError(
+            "Reference latent must flatten to either one sample or the same number of samples as the target; "
+            f"got {int(reference.shape[0])} vs {int(target.shape[0])}."
+        )
+
+    ref_mean, ref_std = _channel_mean_std_nchw(reference)
+    target_f = target.float()
+    target_mean, target_std = _channel_mean_std_nchw(target)
+
+    if int(ref_mean.shape[0]) == 1 and int(target.shape[0]) != 1:
+        ref_mean = ref_mean.expand(int(target.shape[0]), -1, -1, -1)
+        ref_std = ref_std.expand(int(target.shape[0]), -1, -1, -1)
+
+    matched = (target_f - target_mean) * (ref_std.to(device=target.device) / target_std) + ref_mean.to(device=target.device)
+    return matched.to(dtype=target.dtype)
+
+
 def _apply_mix(original: torch.Tensor, modified: torch.Tensor, mix: float) -> torch.Tensor:
     mix = max(0.0, min(1.0, float(mix)))
     if mix <= 0.0:
@@ -1094,6 +1129,74 @@ class LatentChannelMerge:
         return (out_latent,)
 
 
+class LatentChannelMatch:
+    """
+    Matches per-channel mean/std from a reference latent onto a target latent.
+    """
+
+    CATEGORY = "latent/channel"
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION = "match"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "target": ("LATENT", {"tooltip": "Latent whose channels will be normalized to match the reference stats."}),
+                "reference": ("LATENT", {"tooltip": "Reference latent providing the per-channel mean/std to transfer."}),
+                "mix": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "round": 0.01,
+                    "tooltip": "Blend factor between the original target and the fully matched result.",
+                }),
+            },
+            "optional": {
+                "mask": ("MASK", {"tooltip": "Optional mask to limit the matched result to masked areas."}),
+            },
+        }
+
+    def match(self, target, reference, mix: float, mask=None):
+        target = _validate_latent(target)
+        reference = _validate_latent(reference)
+
+        target_samples = target["samples"]
+        reference_samples = reference["samples"]
+        target_flat = _flatten_to_nchw(target_samples)
+        reference_flat = _flatten_to_nchw(reference_samples)
+
+        logger.debug(
+            "LatentChannelMatch target_shape=%s reference_shape=%s mix=%.3f",
+            tuple(target_samples.shape),
+            tuple(reference_samples.shape),
+            float(mix),
+        )
+
+        with torch.no_grad():
+            matched = _match_latent_channel_stats(reference_flat.tensor, target_flat.tensor)
+            out = _apply_mix(target_flat.tensor, matched, mix)
+
+        if mask is not None:
+            if not isinstance(mask, torch.Tensor):
+                raise TypeError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+            mask_nchw = prepare_mask_nchw(
+                mask,
+                batch_size=target_flat.batch_size,
+                height=int(target_samples.shape[-2]),
+                width=int(target_samples.shape[-1]),
+                device=target_flat.tensor.device,
+            )
+            mask_nchw = _expand_mask(mask_nchw, target_flat.extra_dim)
+            out = blend_with_mask(target_flat.tensor, out, mask_nchw)
+
+        out_latent = target.copy()
+        out_latent["samples"] = target_flat.restore(out)
+        return (out_latent,)
+
+
 class LatentPackedSlotTransform:
     """
     Applies slot-level operations to packed (space-to-depth) latents.
@@ -1212,6 +1315,7 @@ NODE_CLASS_MAPPINGS = {
     "LatentChannelLinearTransform": LatentChannelLinearTransform,
     "LatentChannelNonlinearTransform": LatentChannelNonlinearTransform,
     "LatentChannelMerge": LatentChannelMerge,
+    "LatentChannelMatch": LatentChannelMatch,
     "LatentPackedSlotTransform": LatentPackedSlotTransform,
 }
 
@@ -1219,5 +1323,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LatentChannelLinearTransform": "Latent Channel Linear Transform",
     "LatentChannelNonlinearTransform": "Latent Channel Nonlinear Transform",
     "LatentChannelMerge": "Latent Channel Merge",
+    "LatentChannelMatch": "Latent Channel Match",
     "LatentPackedSlotTransform": "Latent Packed Slot Transform",
 }
