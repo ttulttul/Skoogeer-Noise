@@ -452,6 +452,7 @@ pair:
 - YAML must parse to a mapping or to a list of mappings at the top level.
 - Nested objects and nested lists inside variable values are rejected.
 - Empty input returns an empty variable set.
+- Duplicate top-level keys within one YAML document are preserved and merged by source order instead of being collapsed by the YAML loader.
 - When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
 - If `variables` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used to render it first.
 - That pre-render is now partial: placeholders satisfied by the upstream `variables` input are rendered first, while unresolved placeholders are left in place for the later lazy local-reference pass.
@@ -489,6 +490,7 @@ Expands a `MUSTACHE_VARIABLES` mapping into a `MUSTACHE_VARIABLE_LIST`, where ea
 - This node now owns permutation generation, so large Cartesian products can be capped before `Mustache Template` runs.
 - Locally derived YAML values from `Mustache Variables` also expand here, not during YAML parsing, so sampler `limit` is now the place where recursive/local variable explosions are controlled.
 - Lazy placeholder settings like `{{color:randomize}}` are also resolved here. They use the node's seeded RNG, so repeated runs with the same `seed` stay deterministic.
+- Lazy variables are evaluated in dependency order rather than raw YAML insertion order, so later duplicate definitions can safely add references to variables introduced in between.
 - In `random` mode, the sampler does not merely shuffle value lists. It randomizes key order, value order, and the emitted permutation order so the resulting `MUSTACHE_VARIABLE_LIST` is a seeded random subset/permutation of the full space.
 - When a variable value list carries `:probability` metadata from `Mustache Variables`, random sampling uses those probabilities instead of assuming a uniform distribution.
 - Weighted random sampling still emits unique concrete settings. For moderate product sizes it does exact weighted sampling without replacement; for huge spaces it falls back to repeated weighted draws with duplicate rejection.

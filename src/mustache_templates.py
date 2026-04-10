@@ -9,6 +9,7 @@ from bisect import bisect_left
 from typing import Dict, List, Sequence
 
 import yaml
+from yaml.nodes import MappingNode, ScalarNode, SequenceNode
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,45 @@ def _get_variable_template_specs(
     return list(specs)
 
 
+def _dependency_ordered_mustache_variable_keys(variables: MustacheVariablesDict) -> List[str]:
+    visible_keys = _visible_mustache_variable_keys(variables)
+    dependency_sets: Dict[str, set[str]] = {}
+    for variable_name in visible_keys:
+        dependencies: set[str] = set()
+        template_specs = _get_variable_template_specs(variables, variable_name)
+        if template_specs is not None:
+            for template_spec in template_specs:
+                if template_spec is None:
+                    continue
+                _, referenced_variables, _, _ = template_spec
+                for referenced_variable in referenced_variables:
+                    if referenced_variable != variable_name and referenced_variable in visible_keys:
+                        dependencies.add(referenced_variable)
+        dependency_sets[variable_name] = dependencies
+
+    ordered_keys: List[str] = []
+    emitted_keys: set[str] = set()
+    while len(ordered_keys) < len(visible_keys):
+        emitted_this_pass = False
+        for variable_name in visible_keys:
+            if variable_name in emitted_keys:
+                continue
+            if dependency_sets[variable_name].issubset(emitted_keys):
+                ordered_keys.append(variable_name)
+                emitted_keys.add(variable_name)
+                emitted_this_pass = True
+        if emitted_this_pass:
+            continue
+
+        unresolved_keys = [key for key in visible_keys if key not in emitted_keys]
+        raise ValueError(
+            "Mustache variable dependencies contain a cycle or unresolved ordering across: "
+            f"{', '.join(unresolved_keys)}."
+        )
+
+    return ordered_keys
+
+
 def _append_parsed_variable_values(
     variables: MustacheVariablesDict,
     *,
@@ -180,14 +220,20 @@ def _append_parsed_variable_values(
     template_specs: Sequence[CompiledMustacheTemplate | None] | None,
 ) -> None:
     if variable_name in variables:
+        existing_value_count = len(variables[variable_name])
+        raw_specs = _mustache_template_spec_mapping(variables)
+        existing_specs = raw_specs.get(variable_name)
+        if existing_specs is not None and len(existing_specs) != existing_value_count:
+            raise ValueError(
+                f"Mustache variable '{variable_name}' has {existing_value_count} values but {len(existing_specs)} template specs."
+            )
         if _get_variable_weights(variables, variable_name) is not None or weights is not None:
             raise ValueError(
                 f"Mustache variable '{variable_name}' cannot be merged across multiple definitions when weighted values are in use."
             )
         variables[variable_name].extend(str(value) for value in values)
-        existing_specs = _get_variable_template_specs(variables, variable_name)
         if existing_specs is not None or template_specs is not None:
-            combined_specs = [] if existing_specs is None else list(existing_specs)
+            combined_specs = [None] * existing_value_count if existing_specs is None else list(existing_specs)
             combined_specs.extend([None] * len(values) if template_specs is None else list(template_specs))
             _set_variable_template_specs(variables, variable_name, combined_specs)
         return
@@ -366,6 +412,39 @@ def _quote_mustache_yaml_scalars(yaml_text: str) -> str:
     return quoted_text
 
 
+def _construct_yaml_value(loader: yaml.Loader, node):
+    if isinstance(node, ScalarNode):
+        return loader.construct_object(node, deep=True)
+    if isinstance(node, SequenceNode):
+        return [_construct_yaml_value(loader, item) for item in node.value]
+    if isinstance(node, MappingNode):
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=True)
+            mapping[key] = _construct_yaml_value(loader, value_node)
+        return mapping
+    raise ValueError(f"Unsupported YAML node type: {type(node).__name__}.")
+
+
+def _load_yaml_preserving_top_level_order(yaml_text: str):
+    quoted_text = _quote_mustache_yaml_scalars(yaml_text)
+    loader = _YAML_SAFE_LOADER(quoted_text)
+    try:
+        root = loader.get_single_node()
+        if root is None:
+            return None
+        if isinstance(root, MappingNode):
+            return [
+                {
+                    loader.construct_object(key_node, deep=True): _construct_yaml_value(loader, value_node)
+                }
+                for key_node, value_node in root.value
+            ]
+        return _construct_yaml_value(loader, root)
+    finally:
+        loader.dispose()
+
+
 def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
     text = str(yaml_text or "").strip()
     if not text:
@@ -373,7 +452,7 @@ def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
         return {}
 
     try:
-        parsed = yaml.load(_quote_mustache_yaml_scalars(text), Loader=_YAML_SAFE_LOADER)
+        parsed = _load_yaml_preserving_top_level_order(text)
     except yaml.YAMLError as exc:
         raise ValueError(f"Failed to parse Mustache variables YAML: {exc}") from exc
 
@@ -994,7 +1073,7 @@ def sample_mustache_variable_list(
     normalized_limit = _normalize_limit(limit)
     rng = random.Random(int(seed) & _SEED_MASK_64)
 
-    ordered_keys = _visible_mustache_variable_keys(variables)
+    ordered_keys = _dependency_ordered_mustache_variable_keys(variables)
     has_lazy_dependencies = any(
         _get_variable_template_specs(variables, key) is not None
         for key in ordered_keys
