@@ -285,6 +285,28 @@ def test_sample_mustache_variable_list_random_respects_value_weights():
     assert 0.33 <= counts["black"] / 1000 <= 0.47
 
 
+def test_sample_mustache_variable_list_random_preserves_lazy_dependency_order():
+    variables = parse_mustache_variables_yaml(
+        "body_type2:\n"
+        "  - slim\n"
+        "  - athletic\n"
+        "build2:\n"
+        "  - {{body_type2}}\n"
+    )
+
+    sampled = sample_mustache_variable_list(
+        variables,
+        sampling_mode="random",
+        seed=42,
+        limit=4,
+    )
+
+    assert len(sampled) == 2
+    assert {entry["build2"] for entry in sampled} == {"slim", "athletic"}
+    for entry in sampled:
+        assert entry["build2"] == entry["body_type2"]
+
+
 def test_sample_mustache_variable_list_empty_variables_returns_single_empty_setting():
     assert sample_mustache_variable_list({}, limit=-1) == [{}]
 

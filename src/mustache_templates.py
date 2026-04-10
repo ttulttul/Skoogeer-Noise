@@ -811,7 +811,11 @@ def sample_mustache_variable_list(
     rng = random.Random(int(seed) & _SEED_MASK_64)
 
     ordered_keys = _visible_mustache_variable_keys(variables)
-    if normalized_sampling_mode == "random":
+    has_lazy_dependencies = any(
+        _get_variable_template_specs(variables, key) is not None
+        for key in ordered_keys
+    )
+    if normalized_sampling_mode == "random" and not has_lazy_dependencies:
         rng.shuffle(ordered_keys)
 
     if not ordered_keys:
@@ -882,12 +886,13 @@ def sample_mustache_variable_list(
     ]
 
     logger.debug(
-        "Sampled %d/%d mustache variable settings using %s mode with seed=%d limit=%s.",
+        "Sampled %d/%d mustache variable settings using %s mode with seed=%d limit=%s lazy_dependencies=%s.",
         len(sampled_variables),
         total_permutations,
         normalized_sampling_mode,
         int(seed) & _SEED_MASK_64,
         "unbounded" if normalized_limit is None else normalized_limit,
+        has_lazy_dependencies,
     )
     return sampled_variables
 
