@@ -82,6 +82,59 @@ def test_parse_mustache_variables_inputs_merges_multiple_yaml_strings():
     }
 
 
+def test_parse_mustache_variables_yaml_expands_local_references_defined_above():
+    variables = parse_mustache_variables_yaml(
+        "color:\n"
+        "  - brown\n"
+        "  - blue\n"
+        "hairarrangement:\n"
+        "  - ponytail\n"
+        "  - bun\n"
+        "hairstyle:\n"
+        "  - {{color}} hair in a {{hairarrangement}}\n"
+    )
+
+    assert variables == {
+        "color": ["brown", "blue"],
+        "hairarrangement": ["ponytail", "bun"],
+        "hairstyle": [
+            "brown hair in a ponytail",
+            "brown hair in a bun",
+            "blue hair in a ponytail",
+            "blue hair in a bun",
+        ],
+    }
+
+
+def test_parse_mustache_variables_yaml_rejects_local_references_to_later_variables():
+    with pytest.raises(ValueError, match="references undefined variables"):
+        parse_mustache_variables_yaml(
+            "hairstyle:\n"
+            "  - {{color}} hair\n"
+            "color:\n"
+            "  - brown\n"
+        )
+
+
+def test_parse_mustache_variables_yaml_rejects_partial_weights():
+    with pytest.raises(ValueError, match="mixes weighted and unweighted values"):
+        parse_mustache_variables_yaml(
+            "color:\n"
+            "  - brown:0.5\n"
+            "  - blue\n"
+        )
+
+
+def test_parse_mustache_variables_yaml_rejects_weight_sum_not_equal_to_one():
+    with pytest.raises(ValueError, match="weights must sum to 1.0"):
+        parse_mustache_variables_yaml(
+            "color:\n"
+            "  - brown:0.2\n"
+            "  - blue:0.2\n"
+            "  - black:0.2\n"
+        )
+
+
 def test_parse_mustache_variables_yaml_rejects_list_items_that_are_not_mappings():
     with pytest.raises(ValueError, match="lists must contain mappings"):
         parse_mustache_variables_yaml("- just\n- strings\n")
@@ -186,6 +239,29 @@ def test_sample_mustache_variable_list_random_handles_population_above_ssize_t()
     assert len({frozenset(item.items()) for item in first}) == 4
     for item in first:
         assert set(item.keys()) == set(variables.keys())
+
+
+def test_sample_mustache_variable_list_random_respects_value_weights():
+    weighted_variables = parse_mustache_variables_yaml(
+        "color:\n"
+        "  - brown:0.3\n"
+        "  - blue:0.3\n"
+        "  - black:0.4\n"
+    )
+
+    counts = {"brown": 0, "blue": 0, "black": 0}
+    for seed in range(1000):
+        sampled = sample_mustache_variable_list(
+            weighted_variables,
+            sampling_mode="random",
+            seed=seed,
+            limit=1,
+        )
+        counts[sampled[0]["color"]] += 1
+
+    assert 0.24 <= counts["brown"] / 1000 <= 0.36
+    assert 0.24 <= counts["blue"] / 1000 <= 0.36
+    assert 0.33 <= counts["black"] / 1000 <= 0.47
 
 
 def test_sample_mustache_variable_list_empty_variables_returns_single_empty_setting():
@@ -332,6 +408,26 @@ def test_mustache_variables_node_renders_yaml_against_variable_list_input():
     assert variables == {
         "subject_identity": ["fox", "wolf"],
         "camera_lens": ["35mm", "85mm"],
+    }
+
+
+def test_mustache_variables_node_expands_local_references_after_input_rendering():
+    node = MustacheVariables()
+
+    (variables,) = node.parse_variables(
+        "color:\n"
+        "  - {{animal}}-brown\n"
+        "  - {{animal}}-black\n"
+        "hairstyle:\n"
+        "  - {{color}} hair\n",
+        [
+            {"animal": "fox"},
+        ],
+    )
+
+    assert variables == {
+        "color": ["fox-brown", "fox-black"],
+        "hairstyle": ["fox-brown hair", "fox-black hair"],
     }
 
 

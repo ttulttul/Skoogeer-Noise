@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import heapq
 import itertools
 import logging
 import random
 import re
+from bisect import bisect_left
 from typing import Dict, List, Sequence
 
 import yaml
@@ -29,6 +31,9 @@ _SAMPLING_METHODS = ("sequential", "random")
 _REORDER_MODES = ("shuffle", "reverse")
 _MAX_UNBOUNDED_VARIABLE_SETTINGS = 100_000
 _YAML_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_VARIABLE_WEIGHTS_KEY = "__mustache_weights__"
+_WEIGHTED_VALUE_PATTERN = re.compile(r"^(.*?):([0-9]*\.?[0-9]+)\s*$")
+_WEIGHT_TOLERANCE = 1e-6
 
 
 def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
@@ -39,6 +44,224 @@ def _coerce_yaml_scalar_to_string(value, *, variable_name: str) -> str:
     if value is None:
         raise ValueError(f"Mustache variable '{variable_name}' contains a null value, which cannot be rendered into text.")
     return str(value)
+
+
+def _visible_mustache_variable_keys(variables: MustacheVariablesDict) -> List[str]:
+    return [key for key in variables.keys() if key != _VARIABLE_WEIGHTS_KEY]
+
+
+def _mustache_weight_mapping(variables: MustacheVariablesDict) -> Dict[str, List[float]]:
+    raw_weights = variables.get(_VARIABLE_WEIGHTS_KEY)
+    if raw_weights is None:
+        return {}
+    if not isinstance(raw_weights, dict):
+        raise ValueError("MUSTACHE_VARIABLES weight metadata must be a dictionary.")
+    return raw_weights
+
+
+def _set_variable_weights(
+    variables: MustacheVariablesDict,
+    variable_name: str,
+    weights: Sequence[float] | None,
+) -> None:
+    if weights is None:
+        raw_weights = variables.get(_VARIABLE_WEIGHTS_KEY)
+        if isinstance(raw_weights, dict):
+            raw_weights.pop(variable_name, None)
+            if not raw_weights:
+                variables.pop(_VARIABLE_WEIGHTS_KEY, None)
+        return
+
+    if _VARIABLE_WEIGHTS_KEY not in variables:
+        variables[_VARIABLE_WEIGHTS_KEY] = {}
+    raw_weights = variables[_VARIABLE_WEIGHTS_KEY]
+    if not isinstance(raw_weights, dict):
+        raise ValueError("MUSTACHE_VARIABLES weight metadata must be a dictionary.")
+    raw_weights[variable_name] = [float(weight) for weight in weights]
+
+
+def _get_variable_weights(
+    variables: MustacheVariablesDict,
+    variable_name: str,
+) -> List[float] | None:
+    raw_weights = _mustache_weight_mapping(variables)
+    weights = raw_weights.get(variable_name)
+    if weights is None:
+        return None
+    values = variables.get(variable_name)
+    if not isinstance(values, list):
+        raise ValueError(f"Mustache variable '{variable_name}' values must be stored as a list.")
+    if len(weights) != len(values):
+        raise ValueError(
+            f"Mustache variable '{variable_name}' has {len(values)} values but {len(weights)} weights."
+        )
+    normalized = [float(weight) for weight in weights]
+    for weight in normalized:
+        if weight < 0.0 or weight > 1.0 + _WEIGHT_TOLERANCE:
+            raise ValueError(
+                f"Mustache variable '{variable_name}' weights must be between 0.0 and 1.0, got {weight}."
+            )
+    total = sum(normalized)
+    if abs(total - 1.0) > _WEIGHT_TOLERANCE:
+        raise ValueError(f"Mustache variable '{variable_name}' weights must sum to 1.0, got {total:.6f}.")
+    return normalized
+
+
+def _append_parsed_variable_values(
+    variables: MustacheVariablesDict,
+    *,
+    variable_name: str,
+    values: Sequence[str],
+    weights: Sequence[float] | None,
+) -> None:
+    if variable_name in variables:
+        if _get_variable_weights(variables, variable_name) is not None or weights is not None:
+            raise ValueError(
+                f"Mustache variable '{variable_name}' cannot be merged across multiple definitions when weighted values are in use."
+            )
+        variables[variable_name].extend(str(value) for value in values)
+        return
+
+    variables[variable_name] = [str(value) for value in values]
+    _set_variable_weights(variables, variable_name, weights)
+
+
+def _split_weighted_variable_value(value, *, variable_name: str) -> tuple[str, float | None]:
+    text = _coerce_yaml_scalar_to_string(value, variable_name=variable_name)
+    match = _WEIGHTED_VALUE_PATTERN.match(text)
+    if match is None:
+        return text, None
+
+    weight = float(match.group(2))
+    if weight < 0.0 or weight > 1.0 + _WEIGHT_TOLERANCE:
+        raise ValueError(
+            f"Mustache variable '{variable_name}' weight suffix must be between 0.0 and 1.0, got {weight}."
+        )
+    return match.group(1), weight
+
+
+def _expand_local_template_value(
+    template_text: str,
+    *,
+    variable_name: str,
+    variables: MustacheVariablesDict,
+) -> tuple[List[str], List[float] | None]:
+    compiled_format, referenced_variables, field_name_to_variable = _compile_mustache_template(template_text)
+    if not referenced_variables:
+        return [template_text], None
+
+    available_variables = set(_visible_mustache_variable_keys(variables))
+    missing = [name for name in referenced_variables if name not in available_variables]
+    if missing:
+        raise ValueError(
+            f"Mustache variable '{variable_name}' references undefined variables: {', '.join(sorted(missing))}. "
+            "Local template references must be defined earlier in the YAML or supplied through the input variables."
+        )
+
+    value_sets: List[List[str]] = []
+    weight_sets: List[List[float]] = []
+    any_weighted = False
+    for referenced_variable in referenced_variables:
+        values = variables[referenced_variable]
+        value_sets.append(list(values))
+        weights = _get_variable_weights(variables, referenced_variable)
+        if weights is None:
+            weight_sets.append([1.0 / len(values)] * len(values))
+        else:
+            any_weighted = True
+            weight_sets.append(list(weights))
+
+    expanded_values: List[str] = []
+    expanded_weights: List[float] = []
+    index_sets = [range(len(values)) for values in value_sets]
+    for combination in itertools.product(*index_sets):
+        mapping = {
+            referenced_variables[position]: value_sets[position][value_index]
+            for position, value_index in enumerate(combination)
+        }
+        expanded_values.append(_render_compiled_template(compiled_format, field_name_to_variable, mapping))
+        if any_weighted:
+            probability = 1.0
+            for position, value_index in enumerate(combination):
+                probability *= weight_sets[position][value_index]
+            expanded_weights.append(probability)
+
+    return expanded_values, expanded_weights if any_weighted else None
+
+
+def _normalize_probability_distribution(weights: Sequence[float]) -> List[float]:
+    total = float(sum(float(weight) for weight in weights))
+    if total <= _WEIGHT_TOLERANCE:
+        raise ValueError("Weighted mustache variable values must include at least one positive probability.")
+    return [float(weight) / total for weight in weights]
+
+
+def _parse_variable_values(
+    raw_values,
+    *,
+    variable_name: str,
+    variables: MustacheVariablesDict,
+) -> tuple[List[str], List[float] | None]:
+    items = raw_values if isinstance(raw_values, list) else [raw_values]
+    entries: List[tuple[List[str], List[float] | None, float | None]] = []
+    explicit_weight_count = 0
+
+    for item in items:
+        value_text, explicit_weight = _split_weighted_variable_value(item, variable_name=variable_name)
+        expanded_values, expanded_weights = _expand_local_template_value(
+            value_text,
+            variable_name=variable_name,
+            variables=variables,
+        )
+        entries.append((expanded_values, expanded_weights, explicit_weight))
+        if explicit_weight is not None:
+            explicit_weight_count += 1
+
+    if not entries:
+        raise ValueError(f"Mustache variable '{variable_name}' must contain at least one value.")
+
+    if 0 < explicit_weight_count < len(entries):
+        raise ValueError(
+            f"Mustache variable '{variable_name}' mixes weighted and unweighted values; "
+            "every value must provide a trailing :probability when any one does."
+        )
+
+    values: List[str] = []
+    derived_weights: List[float] | None = None
+    if explicit_weight_count == len(entries):
+        explicit_weight_total = sum(
+            float(explicit_weight)
+            for _, _, explicit_weight in entries
+            if explicit_weight is not None
+        )
+        if abs(explicit_weight_total - 1.0) > _WEIGHT_TOLERANCE:
+            raise ValueError(
+                f"Mustache variable '{variable_name}' weights must sum to 1.0, got {explicit_weight_total:.6f}."
+            )
+        derived_weights = []
+        for expanded_values, expanded_weights, explicit_weight in entries:
+            assert explicit_weight is not None
+            distribution = expanded_weights
+            if distribution is None:
+                distribution = [1.0 / len(expanded_values)] * len(expanded_values)
+            for expanded_value, probability in zip(expanded_values, distribution, strict=True):
+                values.append(expanded_value)
+                derived_weights.append(float(explicit_weight) * float(probability))
+    elif any(expanded_weights is not None for _, expanded_weights, _ in entries):
+        derived_weights = []
+        for expanded_values, expanded_weights, _ in entries:
+            distribution = expanded_weights
+            if distribution is None:
+                distribution = [1.0 / len(expanded_values)] * len(expanded_values)
+            for expanded_value, probability in zip(expanded_values, distribution, strict=True):
+                values.append(expanded_value)
+                derived_weights.append(float(probability))
+        derived_weights = _normalize_probability_distribution(derived_weights)
+    else:
+        for expanded_values, _, _ in entries:
+            values.extend(expanded_values)
+
+    return values, derived_weights
 
 
 def _merge_parsed_mustache_variables(parsed, *, variables: MustacheVariablesDict) -> None:
@@ -65,19 +288,52 @@ def _merge_parsed_mustache_variables(parsed, *, variables: MustacheVariablesDict
         key = str(raw_key).strip()
         if not key:
             raise ValueError("Mustache variable names must be non-empty.")
+        if key == _VARIABLE_WEIGHTS_KEY:
+            raise ValueError(f"Mustache variable name '{_VARIABLE_WEIGHTS_KEY}' is reserved.")
 
-        if isinstance(raw_values, list):
-            values = [_coerce_yaml_scalar_to_string(item, variable_name=key) for item in raw_values]
+        values, weights = _parse_variable_values(raw_values, variable_name=key, variables=variables)
+        _append_parsed_variable_values(variables, variable_name=key, values=values, weights=weights)
+
+
+def _quote_mustache_yaml_scalars(yaml_text: str) -> str:
+    quoted_lines: List[str] = []
+    for line in str(yaml_text).splitlines():
+        if "{{" not in line and "}}" not in line:
+            quoted_lines.append(line)
+            continue
+
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            quoted_lines.append(line)
+            continue
+
+        prefix = None
+        remainder = None
+        list_match = re.match(r"^(\s*-\s+)(.+)$", line)
+        if list_match is not None:
+            prefix = list_match.group(1)
+            remainder = list_match.group(2)
         else:
-            values = [_coerce_yaml_scalar_to_string(raw_values, variable_name=key)]
+            mapping_match = re.match(r"^(\s*[^:\n]+:\s+)(.+)$", line)
+            if mapping_match is not None:
+                prefix = mapping_match.group(1)
+                remainder = mapping_match.group(2)
 
-        if not values:
-            raise ValueError(f"Mustache variable '{key}' must contain at least one value.")
+        if prefix is None or remainder is None:
+            quoted_lines.append(line)
+            continue
 
-        if key not in variables:
-            variables[key] = list(values)
-        else:
-            variables[key].extend(values)
+        if remainder.startswith(("'", '"', "|", ">", "[")):
+            quoted_lines.append(line)
+            continue
+
+        escaped_remainder = remainder.replace("\\", "\\\\").replace('"', '\\"')
+        quoted_lines.append(f'{prefix}"{escaped_remainder}"')
+
+    quoted_text = "\n".join(quoted_lines)
+    if str(yaml_text).endswith("\n"):
+        quoted_text += "\n"
+    return quoted_text
 
 
 def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
@@ -87,7 +343,7 @@ def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
         return {}
 
     try:
-        parsed = yaml.load(text, Loader=_YAML_SAFE_LOADER)
+        parsed = yaml.load(_quote_mustache_yaml_scalars(text), Loader=_YAML_SAFE_LOADER)
     except yaml.YAMLError as exc:
         raise ValueError(f"Failed to parse Mustache variables YAML: {exc}") from exc
 
@@ -98,7 +354,11 @@ def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
     variables: MustacheVariablesDict = {}
     _merge_parsed_mustache_variables(parsed, variables=variables)
 
-    logger.debug("Parsed %d mustache variables from YAML: %s", len(variables), tuple(variables.keys()))
+    logger.debug(
+        "Parsed %d mustache variables from YAML: %s",
+        len(_visible_mustache_variable_keys(variables)),
+        tuple(_visible_mustache_variable_keys(variables)),
+    )
     return variables
 
 
@@ -111,16 +371,18 @@ def parse_mustache_variables_inputs(yaml_inputs: Sequence[str] | str) -> Mustach
     merged_variables: MustacheVariablesDict = {}
     for input_index, yaml_text in enumerate(inputs):
         parsed_variables = parse_mustache_variables_yaml(yaml_text)
-        for key, values in parsed_variables.items():
-            if key not in merged_variables:
-                merged_variables[key] = list(values)
-            else:
-                merged_variables[key].extend(values)
+        for key in _visible_mustache_variable_keys(parsed_variables):
+            _append_parsed_variable_values(
+                merged_variables,
+                variable_name=key,
+                values=parsed_variables[key],
+                weights=_get_variable_weights(parsed_variables, key),
+            )
         logger.debug(
             "Merged mustache variables input %d with %d keys into aggregate key count %d.",
             input_index,
-            len(parsed_variables),
-            len(merged_variables),
+            len(_visible_mustache_variable_keys(parsed_variables)),
+            len(_visible_mustache_variable_keys(merged_variables)),
         )
 
     return merged_variables
@@ -204,7 +466,18 @@ def render_mustache_yaml_inputs(
 
     rendered_inputs: List[str] = []
     for yaml_text in inputs:
-        rendered_inputs.extend(render_mustache_template_list(yaml_text, variables))
+        template_text = str(yaml_text)
+        for setting_index, mapping in enumerate(variables):
+            if not isinstance(mapping, dict):
+                raise ValueError(
+                    f"MUSTACHE_VARIABLE_LIST items must be dictionaries, got {type(mapping).__name__} at index {setting_index}."
+                )
+            rendered_inputs.append(
+                _MUSTACHE_VARIABLE_PATTERN.sub(
+                    lambda match: mapping.get(match.group(1).strip(), match.group(0)),
+                    template_text,
+                )
+            )
     return rendered_inputs
 
 
@@ -363,6 +636,108 @@ def _sample_unique_indices(total_count: int, sample_count: int, rng: random.Rand
     return sampled_indices
 
 
+def _weighted_choice_index(cumulative_weights: Sequence[float], rng: random.Random) -> int:
+    draw = rng.random()
+    return min(bisect_left(cumulative_weights, draw), len(cumulative_weights) - 1)
+
+
+def _materialized_weighted_sample_without_replacement(
+    ordered_keys: Sequence[str],
+    value_sets: Sequence[Sequence[str]],
+    weight_sets: Sequence[Sequence[float]],
+    sample_count: int,
+    rng: random.Random,
+) -> MustacheVariableList:
+    weighted_settings: List[tuple[float, Dict[str, str]]] = []
+    index_sets = [range(len(values)) for values in value_sets]
+    for combination in itertools.product(*index_sets):
+        probability = 1.0
+        for position, value_index in enumerate(combination):
+            probability *= float(weight_sets[position][value_index])
+        if probability <= 0.0:
+            continue
+        weighted_settings.append((
+            rng.random() ** (1.0 / probability),
+            {
+                ordered_keys[position]: value_sets[position][value_index]
+                for position, value_index in enumerate(combination)
+            },
+        ))
+
+    if len(weighted_settings) < sample_count:
+        raise ValueError(
+            "Weighted random sampling does not have enough positive-probability combinations to satisfy the requested limit."
+        )
+
+    return [setting for _, setting in heapq.nlargest(sample_count, weighted_settings, key=lambda item: item[0])]
+
+
+def _weighted_random_sample_mustache_variable_list(
+    ordered_keys: Sequence[str],
+    value_sets: Sequence[Sequence[str]],
+    weight_sets: Sequence[Sequence[float]],
+    *,
+    total_permutations: int,
+    sample_count: int,
+    rng: random.Random,
+) -> MustacheVariableList:
+    positive_permutations = 1
+    cumulative_weight_sets: List[List[float]] = []
+    for values, weights in zip(value_sets, weight_sets, strict=True):
+        if len(values) != len(weights):
+            raise ValueError("Weighted mustache variable sampling requires a weight for each value.")
+        positive_count = sum(1 for weight in weights if float(weight) > 0.0)
+        positive_permutations *= positive_count
+        cumulative: List[float] = []
+        running_total = 0.0
+        for weight in weights:
+            running_total += float(weight)
+            cumulative.append(running_total)
+        cumulative_weight_sets.append(cumulative)
+
+    if sample_count > positive_permutations:
+        raise ValueError(
+            "Weighted random sampling does not have enough positive-probability combinations to satisfy the requested limit."
+        )
+
+    if total_permutations <= _MAX_UNBOUNDED_VARIABLE_SETTINGS:
+        return _materialized_weighted_sample_without_replacement(
+            ordered_keys,
+            value_sets,
+            weight_sets,
+            sample_count,
+            rng,
+        )
+
+    sampled_variables: MustacheVariableList = []
+    seen_combinations: set[tuple[int, ...]] = set()
+    consecutive_duplicates = 0
+    max_consecutive_duplicates = max(sample_count * 50, 1000)
+    while len(sampled_variables) < sample_count:
+        chosen_indices: List[int] = []
+        sampled_setting: Dict[str, str] = {}
+        for key, values, cumulative_weights in zip(ordered_keys, value_sets, cumulative_weight_sets, strict=True):
+            chosen_index = _weighted_choice_index(cumulative_weights, rng)
+            chosen_indices.append(chosen_index)
+            sampled_setting[key] = values[chosen_index]
+
+        encoded_indices = tuple(chosen_indices)
+        if encoded_indices in seen_combinations:
+            consecutive_duplicates += 1
+            if consecutive_duplicates > max_consecutive_duplicates:
+                raise ValueError(
+                    "Weighted random sampling could not find enough unique combinations efficiently. "
+                    "Reduce limit or flatten the weighted variable space."
+                )
+            continue
+
+        consecutive_duplicates = 0
+        seen_combinations.add(encoded_indices)
+        sampled_variables.append(sampled_setting)
+
+    return sampled_variables
+
+
 def sample_mustache_variable_list(
     variables: MustacheVariablesDict,
     *,
@@ -374,7 +749,7 @@ def sample_mustache_variable_list(
     normalized_limit = _normalize_limit(limit)
     rng = random.Random(int(seed) & _SEED_MASK_64)
 
-    ordered_keys = list(variables.keys())
+    ordered_keys = _visible_mustache_variable_keys(variables)
     if normalized_sampling_mode == "random":
         rng.shuffle(ordered_keys)
 
@@ -393,7 +768,7 @@ def sample_mustache_variable_list(
     value_sets: List[List[str]] = []
     for key in ordered_keys:
         values = list(variables[key])
-        if normalized_sampling_mode == "random":
+        if normalized_sampling_mode == "random" and _get_variable_weights(variables, key) is None:
             values = rng.sample(values, k=len(values))
         value_sets.append(values)
 
@@ -402,11 +777,28 @@ def sample_mustache_variable_list(
 
     sampled_variables: MustacheVariableList = []
     if normalized_sampling_mode == "random":
-        sampled_indices = _sample_unique_indices(total_permutations, sample_count, rng)
-        sampled_variables = [
-            _variable_setting_for_index(ordered_keys, value_sets, permutation_index)
-            for permutation_index in sampled_indices
-        ]
+        if any(_get_variable_weights(variables, key) is not None for key in ordered_keys):
+            normalized_weight_sets: List[List[float]] = []
+            for key, values in zip(ordered_keys, value_sets, strict=True):
+                weights = _get_variable_weights(variables, key)
+                if weights is None:
+                    normalized_weight_sets.append([1.0 / len(values)] * len(values))
+                else:
+                    normalized_weight_sets.append(list(weights))
+            sampled_variables = _weighted_random_sample_mustache_variable_list(
+                ordered_keys,
+                value_sets,
+                normalized_weight_sets,
+                total_permutations=total_permutations,
+                sample_count=sample_count,
+                rng=rng,
+            )
+        else:
+            sampled_indices = _sample_unique_indices(total_permutations, sample_count, rng)
+            sampled_variables = [
+                _variable_setting_for_index(ordered_keys, value_sets, permutation_index)
+                for permutation_index in sampled_indices
+            ]
     else:
         for combination in itertools.islice(itertools.product(*value_sets), sample_count):
             sampled_variables.append(dict(zip(ordered_keys, combination, strict=True)))
@@ -500,7 +892,10 @@ class MustacheVariables:
         variable_list = _normalize_mustache_variable_list_input(variables)
         rendered_yaml_inputs = render_mustache_yaml_inputs(yaml_text, variable_list)
         variables = parse_mustache_variables_inputs(rendered_yaml_inputs)
-        logger.debug("MustacheVariables node produced %d variable groups.", len(variables))
+        logger.debug(
+            "MustacheVariables node produced %d variable groups.",
+            len(_visible_mustache_variable_keys(variables)),
+        )
         return (variables,)
 
 

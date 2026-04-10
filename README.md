@@ -419,6 +419,22 @@ leglength:
   - weird
 ```
 
+Local references can also expand earlier variables in the same YAML:
+
+```yaml
+color:
+  - brown
+  - blue
+  - black
+
+hairarrangement:
+  - ponytail
+  - bun
+
+hairstyle:
+  - {{color}} hair in a {{hairarrangement}}
+```
+
 ##### Notes
 
 - YAML must parse to a mapping or to a list of mappings at the top level.
@@ -426,8 +442,13 @@ leglength:
 - Empty input returns an empty variable set.
 - When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
 - If `variables` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used to render it first.
+- That pre-render is now partial: placeholders satisfied by the upstream `variables` input are rendered first, while unresolved placeholders are left in place for the top-down local-YAML expansion pass.
 - This is the intended way to chain stages such as `Mustache Variables -> Mustache Variable Sampler -> Reorder List -> Mustache Variables`.
 - Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
+- Variable values may reference variables defined earlier in the same YAML. Those earlier values are expanded in top-to-bottom order, so derived entries like `{{color}} hair` are materialized during parsing.
+- Local template references must point to variables defined earlier in the YAML or to values supplied through the optional `variables` input. Referencing a later variable raises an error.
+- Random weights can be attached to a variable value by appending `:probability` to the end of the scalar, for example `black:0.4`.
+- When any value for a variable uses a `:probability` suffix, every value for that variable must use one, and the probabilities for that variable must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
 - The `variables` input tolerates nested list wrappers from upstream list utilities and concatenation nodes, as long as the leaves are variable-setting dictionaries.
 
@@ -453,6 +474,8 @@ Expands a `MUSTACHE_VARIABLES` mapping into a `MUSTACHE_VARIABLE_LIST`, where ea
 
 - This node now owns permutation generation, so large Cartesian products can be capped before `Mustache Template` runs.
 - In `random` mode, the sampler does not merely shuffle value lists. It randomizes key order, value order, and the emitted permutation order so the resulting `MUSTACHE_VARIABLE_LIST` is a seeded random subset/permutation of the full space.
+- When a variable value list carries `:probability` metadata from `Mustache Variables`, random sampling uses those probabilities instead of assuming a uniform distribution.
+- Weighted random sampling still emits unique concrete settings. For moderate product sizes it does exact weighted sampling without replacement; for huge spaces it falls back to repeated weighted draws with duplicate rejection.
 - When `limit` is finite, random sampling draws unique permutation indices directly from the full mixed-radix space in `O(limit)` time and memory. It does not rely on `random.sample(range(...))`, so it still works when the total permutation count is larger than Python's `Py_ssize_t` range.
 - If `limit = -1`, the node is being asked to materialize the full output list. To avoid workflows that appear hung on huge permutation spaces, unbounded expansion now raises an error once the total setting count exceeds `100000`; use a finite `limit` in those cases.
 
