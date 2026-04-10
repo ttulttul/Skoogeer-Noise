@@ -276,7 +276,7 @@ def _compile_local_template_value(
     if missing:
         raise ValueError(
             f"Mustache variable '{variable_name}' references undefined variables: {', '.join(sorted(missing))}. "
-            "Local template references must be defined earlier in the YAML or supplied through the input variables."
+            "Local template references must be defined in the same YAML or supplied through the input variables."
         )
     return compiled_format, referenced_variables, field_name_to_variable, field_name_to_setting
 
@@ -330,7 +330,7 @@ def _parse_variable_values(
     return values, derived_weights, template_specs
 
 
-def _merge_parsed_mustache_variables(parsed, *, variables: MustacheVariablesDict) -> None:
+def _collect_parsed_mustache_variable_definitions(parsed, *, collected: Dict[str, object]) -> None:
     if parsed is None:
         return
 
@@ -341,7 +341,7 @@ def _merge_parsed_mustache_variables(parsed, *, variables: MustacheVariablesDict
                     "Mustache variables YAML lists must contain mappings, "
                     f"got {type(item).__name__} at list index {index}."
                 )
-            _merge_parsed_mustache_variables(item, variables=variables)
+            _collect_parsed_mustache_variable_definitions(item, collected=collected)
         return
 
     if not isinstance(parsed, dict):
@@ -360,15 +360,9 @@ def _merge_parsed_mustache_variables(parsed, *, variables: MustacheVariablesDict
             key,
             context="Mustache variable name",
         )
-
-        values, weights, template_specs = _parse_variable_values(raw_values, variable_name=key, variables=variables)
-        _append_parsed_variable_values(
-            variables,
-            variable_name=key,
-            values=values,
-            weights=weights,
-            template_specs=template_specs,
-        )
+        if key in collected:
+            raise ValueError(f"Mustache variable '{key}' is defined more than once in the same YAML input.")
+        collected[key] = raw_values
 
 
 def _quote_mustache_yaml_scalars(yaml_text: str) -> str:
@@ -460,8 +454,20 @@ def parse_mustache_variables_yaml(yaml_text: str) -> MustacheVariablesDict:
         logger.debug("Mustache variables YAML parsed to None; returning an empty variable set.")
         return {}
 
+    raw_definitions: Dict[str, object] = {}
+    _collect_parsed_mustache_variable_definitions(parsed, collected=raw_definitions)
+
+    available_variables: MustacheVariablesDict = {key: [] for key in raw_definitions.keys()}
     variables: MustacheVariablesDict = {}
-    _merge_parsed_mustache_variables(parsed, variables=variables)
+    for key, raw_values in raw_definitions.items():
+        values, weights, template_specs = _parse_variable_values(
+            raw_values,
+            variable_name=key,
+            variables=available_variables,
+        )
+        variables[key] = [str(value) for value in values]
+        _set_variable_weights(variables, key, weights)
+        _set_variable_template_specs(variables, key, template_specs)
 
     logger.debug(
         "Parsed %d mustache variables from YAML: %s",

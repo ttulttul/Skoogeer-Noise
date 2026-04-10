@@ -59,64 +59,36 @@ def test_parse_mustache_variables_yaml_accepts_list_of_mappings():
         "- leglength:\n"
         "  - short\n"
         "  - long\n"
-        "- haircolor:\n"
-        "  - black\n"
     )
 
     assert variables == {
-        "haircolor": ["brown", "blonde", "black"],
+        "haircolor": ["brown", "blonde"],
         "leglength": ["short", "long"],
     }
 
 
-def test_parse_mustache_variables_yaml_preserves_duplicate_top_level_key_order():
-    variables = parse_mustache_variables_yaml(
-        "base:\n"
-        "  - x\n"
-        "location:\n"
-        "  - {{base}}\n"
-        "middle:\n"
-        "  - y\n"
-        "location:\n"
-        "  - {{middle}}\n"
-    )
-
-    assert variables["location"] == ["{{base}}", "{{middle}}"]
-
-    sampled = sample_mustache_variable_list(
-        variables,
-        sampling_mode="sequential",
-        limit=-1,
-    )
-    assert sampled == [
-        {"base": "x", "middle": "y", "location": "x"},
-        {"base": "x", "middle": "y", "location": "y"},
-    ]
+def test_parse_mustache_variables_yaml_rejects_duplicate_top_level_keys():
+    with pytest.raises(ValueError, match="defined more than once"):
+        parse_mustache_variables_yaml(
+            "base:\n"
+            "  - x\n"
+            "location:\n"
+            "  - {{base}}\n"
+            "middle:\n"
+            "  - y\n"
+            "location:\n"
+            "  - {{middle}}\n"
+        )
 
 
-def test_parse_mustache_variables_yaml_merges_plain_then_lazy_duplicate_values():
-    variables = parse_mustache_variables_yaml(
-        "base:\n"
-        "  - x\n"
-        "wall_type:\n"
-        "  - plain wall\n"
-        "middle:\n"
-        "  - y\n"
-        "wall_type:\n"
-        "  - {{middle}} wall\n"
-    )
-
-    assert variables["wall_type"] == ["plain wall", "{{middle}} wall"]
-
-    sampled = sample_mustache_variable_list(
-        variables,
-        sampling_mode="sequential",
-        limit=-1,
-    )
-    assert sampled == [
-        {"base": "x", "middle": "y", "wall_type": "plain wall"},
-        {"base": "x", "middle": "y", "wall_type": "y wall"},
-    ]
+def test_parse_mustache_variables_yaml_rejects_duplicate_keys_in_mapping_list():
+    with pytest.raises(ValueError, match="defined more than once"):
+        parse_mustache_variables_yaml(
+            "- haircolor:\n"
+            "  - brown\n"
+            "- haircolor:\n"
+            "  - black\n"
+        )
 
 
 def test_parse_mustache_variables_inputs_merges_multiple_yaml_strings():
@@ -132,16 +104,16 @@ def test_parse_mustache_variables_inputs_merges_multiple_yaml_strings():
     }
 
 
-def test_parse_mustache_variables_yaml_expands_local_references_defined_above():
+def test_parse_mustache_variables_yaml_expands_local_references_without_order_constraints():
     variables = parse_mustache_variables_yaml(
+        "hairstyle:\n"
+        "  - {{color}} hair in a {{hairarrangement}}\n"
         "color:\n"
         "  - brown\n"
         "  - blue\n"
         "hairarrangement:\n"
         "  - ponytail\n"
         "  - bun\n"
-        "hairstyle:\n"
-        "  - {{color}} hair in a {{hairarrangement}}\n"
     )
 
     assert variables["color"] == ["brown", "blue"]
@@ -177,13 +149,11 @@ def test_parse_mustache_variables_yaml_expands_local_references_defined_above():
     ]
 
 
-def test_parse_mustache_variables_yaml_rejects_local_references_to_later_variables():
+def test_parse_mustache_variables_yaml_rejects_undefined_local_references():
     with pytest.raises(ValueError, match="references undefined variables"):
         parse_mustache_variables_yaml(
             "hairstyle:\n"
             "  - {{color}} hair\n"
-            "color:\n"
-            "  - brown\n"
         )
 
 
