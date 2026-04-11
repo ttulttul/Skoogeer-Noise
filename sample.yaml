@@ -41,7 +41,7 @@ material_base:
 material_plural:
   - "concrete panels"
   - "tile walls"
-  - "steel cladding"
+  - "steel wall panels"
   - "glass-block partitions"
 
 material_modifier:
@@ -113,7 +113,7 @@ action_verb:
 
 action_modifier:
   - "toward the light"
-  - "against the wall"
+  - "close to the wall"
   - "through the haze"
   - "into the reflected glow"
 
@@ -334,9 +334,9 @@ base_surface:
   - "{{lighting_color}}-washed {{material_base}}"
 
 surface_phrase:
-  - "{{surface_prefix:notrim}}{{material_base}} surfaces"
   - "{{surface_prefix:notrim}}{{material_plural}}"
-  - "{{surface_prefix:notrim}}{{base_surface}} surfaces"
+  - "{{material_modifier}} {{material_plural}}"
+  - "{{lighting_color:static}}-washed {{material_plural}}"
 
 wardrobe_material:
   - "{{dominant_color:static,lowercase}} {{fabric_finish}} {{fabric_base}}"
@@ -346,7 +346,7 @@ wardrobe_piece:
   - "slip dress"
   - "corset"
   - "bodysuit"
-  - "jacket"
+  - "cutout dress"
 
 wardrobe:
   - "{{wardrobe_material}} {{wardrobe_piece}}"
@@ -355,11 +355,11 @@ wardrobe:
 layered_wardrobe:
   - "{{wardrobe}}"
   - "{{wardrobe}} under a {{accent_color:static,lowercase}} {{garment_layer}}"
-  - "{{wardrobe}} with a {{garment_damage}} and {{accent_color:static,lowercase}} {{garment_layer}}"
+  - "{{wardrobe}} marked by a {{garment_damage}} beneath a {{accent_color:static,lowercase}} {{garment_layer}}"
 
 accent_trim:
-  - "{{accent_color:lowercase}} piping"
-  - "{{accent_color:lowercase}} ribbon with {{accent_color:repeat,lowercase}} stitching"
+  - "{{accent_color:static,lowercase}} piping"
+  - "{{accent_color:static,lowercase}} ribbon with {{accent_color:static,lowercase}} stitching"
 
 hair_style:
   - "{{hair_length}} {{hair_tone}} hair"
@@ -370,7 +370,7 @@ expression_detail:
   - "{{expression_base}} {{expression_intensity}}"
 
 expression_phrase:
-  - "faces set in {{expression_base}} focus"
+  - "faces carrying a {{expression_base}} look"
   - "expressions held {{expression_intensity}}"
   - "eyes turned {{gaze_target}}"
 
@@ -385,18 +385,18 @@ makeup_detail:
 
 jewelry_detail:
   - "{{metal_tone}} {{jewelry_type}}"
-  - "{{metal_tone}} {{jewelry_type}} catching {{lighting_color}} reflections"
+  - "{{metal_tone}} {{jewelry_type}} catching {{lighting_color:static}} reflections"
 
 lens_detail:
   - "{{lens_modifier:notrim}}{{lens_type}}"
 
 camera_tag:
-  - "shot on {{camera_family:uppercase}} through {{lens_detail}}"
+  - "shot on {{camera_family:uppercase}} through {{lens_detail:static}}"
 
 lighting_style:
-  - "{{lighting_color}} fluorescent haze"
-  - "{{lighting_color}} rim light over {{atmosphere_particle}}"
-  - "{{lighting_color}} neon spill with {{lighting_color:repeat}} reflections"
+  - "{{lighting_color:static}} fluorescent haze"
+  - "{{lighting_color:static}} rim light over {{atmosphere_particle:static}}"
+  - "{{lighting_color:static}} neon spill with {{lighting_color:static}} reflections"
 
 posture_dynamic:
   - "{{action_verb}} {{action_modifier}}"
@@ -415,7 +415,7 @@ graffiti_panel:
   - "{{graffiti_style}} graffiti on {{base_surface}}"
 
 emission_detail:
-  - "{{emission_source}} casting {{lighting_color}} shadows"
+  - "{{emission_source}} casting {{lighting_color:static}} shadows"
   - "{{emission_source}} turning the air into {{reflection_quality}}"
 
 frame_composition:
@@ -427,34 +427,34 @@ frame_composition:
 prop_detail:
   - "{{prop_object}} dangling from one hand"
   - "{{prop_object}} abandoned at the edge of frame"
-  - "{{prop_object}} catching stray {{lighting_color}} light"
+  - "{{prop_object}} catching stray {{lighting_color:static}} light"
 
 color_story:
-  - "{{dominant_color:lowercase}} against {{accent_color:lowercase}} accents"
-  - "{{dominant_color:lowercase}} wardrobe against {{lighting_color}} light"
-  - "{{accent_color:lowercase}} details echoing through {{lighting_color}} spill"
+  - "{{dominant_color:static,lowercase}} against {{accent_color:static,lowercase}} accents"
+  - "{{dominant_color:static,lowercase}} wardrobe against {{lighting_color:static}} light"
+  - "{{accent_color:static,lowercase}} details echoing through {{lighting_color:static}} spill"
 
 camera_behavior:
-  - "{{camera_angle}} with {{focus_behavior}}"
-  - "{{camera_angle}} through {{lens_detail}} with {{focus_behavior}}"
+  - "{{camera_angle:static}} with {{focus_behavior:static}}"
+  - "{{camera_angle:static}} through {{lens_detail:static}} with {{focus_behavior:static}}"
 
 set_dressing_line:
   - "{{set_dressing}}"
-  - "{{set_dressing}} beside {{surface_phrase}}"
-  - "{{set_dressing}} under {{lighting_style}}"
+  - "{{set_dressing}} beside {{surface_phrase:static}}"
+  - "{{set_dressing}} under {{lighting_style:static}}"
 
 texture_clause:
-  - "{{surface_phrase:propercase}} show {{reflection_quality}}."
-  - "{{skin_highlight:propercase}} cuts through {{lighting_style}}."
-  - "{{set_dressing_line:propercase}}."
+  - "{{surface_phrase:static,propercase}} show {{reflection_quality:static}}."
+  - "{{skin_highlight:static,propercase}} cuts through {{lighting_style:static}}."
+  - "{{set_dressing_line:static,propercase}}."
 
 asymmetry_clause:
-  - "Composition favors asymmetry, with {{left_detail_focus}} and {{right_detail_focus}}."
-  - "The frame splits attention between {{left_detail_focus}} and {{right_detail_focus}}."
+  - "Composition favors asymmetry, with {{left_detail_focus:static}} and {{right_detail_focus:static}}."
+  - "The frame splits attention between {{left_detail_focus:static}} and {{right_detail_focus:static}}."
 
 grade_clause:
-  - "Color treatment leans into {{grade_profile}} and {{scene_motif}}."
-  - "The finish suggests {{scene_motif}} filtered through {{grade_profile}}."
+  - "Color treatment leans into {{grade_profile:static}} and {{scene_motif:static}}."
+  - "The finish suggests {{scene_motif:static}} filtered through {{grade_profile:static}}."
 
 # Level 2 - entities and scene components
 paired_subject:
@@ -473,7 +473,7 @@ opening_line:
 
 subject_clause:
   - "{{opening_line}}"
-  - "{{opening_line}} Their styling resolves around {{color_story}}."
+  - "{{opening_line}} Their presence suggests {{scene_motif:static}}."
 
 interaction_line:
   - "They move in mirrored rhythm as they {{posture_dynamic}}, their {{skin_state}} skin catching the light."
@@ -506,7 +506,7 @@ detail_clause:
 style_line:
   - "The image feels tactile, nocturnal, and emotionally precise under {{lighting_style}}."
   - "The frame stays cinematic and tense under {{lighting_style}}, with surfaces built from {{base_surface}}."
-  - "The composition settles into {{frame_composition}}, dense with {{atmosphere_particle}} and {{reflection_quality}}."
+  - "The composition settles into {{frame_composition}}, dense with {{atmosphere_particle}} and subterranean tension."
 
 camera_clause:
   - "Camera behavior stays {{camera_behavior}}."
@@ -515,24 +515,24 @@ camera_clause:
 
 micro_line:
   - "{{micro_gesture:propercase}}."
-  - "The palette resolves as {{color_story}}."
-  - "The mood lingers {{story_implication}}."
+  - "The palette resolves as {{color_story:static}}."
+  - "The mood lingers {{story_implication:static}}."
 
 closing_clause:
   - "{{micro_line}}"
   - "{{micro_line}} {{optional_coda}}"
-  - "{{micro_line}} {{grade_clause}} {{optional_coda}}"
+  - "{{grade_clause}} {{optional_coda}}"
 
 scene_cut:
   - "{{subject_clause}} {{blocking_clause}} {{environment_clause}} {{detail_clause}} {{style_line}} {{asymmetry_clause}} {{closing_clause}}"
-  - "{{subject_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{camera_clause}} {{grade_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{camera_clause}} {{closing_clause}}"
   - "{{subject_clause}} {{style_line}} {{environment_clause}} {{blocking_clause}} {{detail_clause}} {{texture_clause}} {{closing_clause}}"
   - "{{subject_clause}} {{camera_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{asymmetry_clause}} {{closing_clause}}"
 
 # Level 1 - final engine
 prompt_path:
   - "{{scene_cut}}":0.45
-  - "{{scene_cut}} {{micro_line}}":0.20
+  - "{{scene_cut}}":0.20
   - "{{scene_cut}}":0.35
 
 final_prompt:
