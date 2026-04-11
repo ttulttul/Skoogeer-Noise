@@ -425,7 +425,7 @@ Builds a one-key `MUSTACHE_VARIABLES` mapping without writing YAML manually. Use
 Parses a YAML mapping of variable names to candidate values and packages it as a `MUSTACHE_VARIABLES` dictionary for downstream templating nodes.
 
 For a workflow-oriented walkthrough with recursive-template patterns and operator usage, see [`docs/mustache_template_guide.yaml`](docs/mustache_template_guide.yaml).
-For a larger working YAML sample that follows that guide's layered approach, see [`sample.yaml`](sample.yaml).
+For a larger tracked YAML sample that follows that guide's layered approach and demonstrates weighted optional clauses, clause reuse, and deeper nested composition, see [`sample.yaml`](sample.yaml).
 
 - **Menu category:** `text/template`
 - **Returns:** `MUSTACHE_VARIABLES`

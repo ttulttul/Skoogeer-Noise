@@ -38,6 +38,12 @@ material_base:
   - "steel"
   - "glass block"
 
+material_plural:
+  - "concrete panels"
+  - "tile walls"
+  - "steel cladding"
+  - "glass-block partitions"
+
 material_modifier:
   - "wet"
   - "cracked"
@@ -150,6 +156,12 @@ reflection_quality:
   - "ghosted silhouettes"
   - "soft mirror flare"
 
+skin_highlight:
+  - "collarbone gleam"
+  - "shine along the shoulders"
+  - "light skating across the jawline"
+  - "a wet shimmer at the wrists"
+
 architecture_base:
   - "service tunnel"
   - "subway corridor"
@@ -240,6 +252,76 @@ story_implication:
   - "as though the tunnel itself is listening"
   - "with the hush of a covert rendezvous"
 
+camera_angle:
+  - "low angle"
+  - "eye level"
+  - "slightly overhead"
+  - "off-axis"
+
+focus_behavior:
+  - "shallow depth of field"
+  - "crisp foreground detail"
+  - "smudged edge bloom"
+  - "selective focus"
+
+set_dressing:
+  - "coils of cable at the baseboards"
+  - "paint flakes collecting near drains"
+  - "standing water trembling with vibration"
+  - "condensation beading on junction boxes"
+
+garment_layer:
+  - "overshirt"
+  - "bolero"
+  - "cropped jacket"
+  - "sheer shrug"
+
+garment_damage:
+  - "frayed hem"
+  - "water-darkened seam"
+  - "twisted strap"
+  - "torn mesh panel"
+
+pose_anchor:
+  - "shoulder-first"
+  - "hip-forward"
+  - "chin lifted"
+  - "knees flexed"
+
+grade_profile:
+  - "silver-black contrast"
+  - "sodium bloom"
+  - "bleach-bypass grit"
+  - "cyan-shadow separation"
+
+scene_motif:
+  - "surveillance romance"
+  - "industrial glamour"
+  - "transit fugue"
+  - "after-hours ritual"
+
+left_detail_focus:
+  - "the left figure carrying {{skin_highlight}}"
+  - "the left figure marked by {{garment_damage}}"
+  - "the left figure held {{pose_anchor}}"
+
+right_detail_focus:
+  - "the right figure catching {{reflection_quality}}"
+  - "the right figure framed by {{skin_highlight}}"
+  - "the right figure showing a {{garment_damage}}"
+
+optional_overlay:
+  - "":0.55
+  - "A faint veil of {{atmosphere_particle}} drifts through the frame.":0.20
+  - "The background carries {{reflection_quality}} around every hard edge.":0.15
+  - "The air feels alive with {{temperature_detail}} and {{sound_detail}}.":0.10
+
+optional_coda:
+  - "":0.60
+  - "Nothing in the frame feels accidental.":0.15
+  - "Every surface seems to answer the bodies in front of it.":0.15
+  - "The image lands somewhere between surveillance and fever dream.":0.10
+
 # Level 3 - molecules
 skin_state:
   - "{{moisture_state}}"
@@ -252,8 +334,9 @@ base_surface:
   - "{{lighting_color}}-washed {{material_base}}"
 
 surface_phrase:
-  - "{{surface_prefix:notrim}}{{material_base}}"
-  - "{{surface_prefix:notrim}}{{base_surface}}"
+  - "{{surface_prefix:notrim}}{{material_base}} surfaces"
+  - "{{surface_prefix:notrim}}{{material_plural}}"
+  - "{{surface_prefix:notrim}}{{base_surface}} surfaces"
 
 wardrobe_material:
   - "{{dominant_color:static,lowercase}} {{fabric_finish}} {{fabric_base}}"
@@ -269,6 +352,11 @@ wardrobe:
   - "{{wardrobe_material}} {{wardrobe_piece}}"
   - "{{wardrobe_material}} harness with {{accent_color:static,lowercase}} straps"
 
+layered_wardrobe:
+  - "{{wardrobe}}"
+  - "{{wardrobe}} under a {{accent_color:static,lowercase}} {{garment_layer}}"
+  - "{{wardrobe}} with a {{garment_damage}} and {{accent_color:static,lowercase}} {{garment_layer}}"
+
 accent_trim:
   - "{{accent_color:lowercase}} piping"
   - "{{accent_color:lowercase}} ribbon with {{accent_color:repeat,lowercase}} stitching"
@@ -282,7 +370,7 @@ expression_detail:
   - "{{expression_base}} {{expression_intensity}}"
 
 expression_phrase:
-  - "faces set in {{expression_detail}} focus"
+  - "faces set in {{expression_base}} focus"
   - "expressions held {{expression_intensity}}"
   - "eyes turned {{gaze_target}}"
 
@@ -334,6 +422,7 @@ frame_composition:
   - "{{shot_frame}} under {{lighting_style}}"
   - "{{shot_frame}} built around {{reflection_quality}}"
   - "{{shot_frame}} with {{surface_phrase}} and {{atmosphere_particle}}"
+  - "{{shot_frame}} built from {{grade_profile}} and {{reflection_quality}}"
 
 prop_detail:
   - "{{prop_object}} dangling from one hand"
@@ -345,6 +434,28 @@ color_story:
   - "{{dominant_color:lowercase}} wardrobe against {{lighting_color}} light"
   - "{{accent_color:lowercase}} details echoing through {{lighting_color}} spill"
 
+camera_behavior:
+  - "{{camera_angle}} with {{focus_behavior}}"
+  - "{{camera_angle}} through {{lens_detail}} with {{focus_behavior}}"
+
+set_dressing_line:
+  - "{{set_dressing}}"
+  - "{{set_dressing}} beside {{surface_phrase}}"
+  - "{{set_dressing}} under {{lighting_style}}"
+
+texture_clause:
+  - "{{surface_phrase:propercase}} show {{reflection_quality}}."
+  - "{{skin_highlight:propercase}} cuts through {{lighting_style}}."
+  - "{{set_dressing_line:propercase}}."
+
+asymmetry_clause:
+  - "Composition favors asymmetry, with {{left_detail_focus}} and {{right_detail_focus}}."
+  - "The frame splits attention between {{left_detail_focus}} and {{right_detail_focus}}."
+
+grade_clause:
+  - "Color treatment leans into {{grade_profile}} and {{scene_motif}}."
+  - "The finish suggests {{scene_motif}} filtered through {{grade_profile}}."
+
 # Level 2 - entities and scene components
 paired_subject:
   - "a {{subject_role}} and a {{subject_role:repeat}} counterpart"
@@ -352,43 +463,71 @@ paired_subject:
   - "two {{subject_build}} {{subject_role}}s"
 
 lead_subject:
-  - "{{paired_subject}} with {{hair_style}}, wearing {{wardrobe}} and {{beauty_detail}}"
-  - "{{paired_subject}} in {{wardrobe}} with {{hair_style}} and {{jewelry_detail}}"
-  - "{{paired_subject}} styled in {{wardrobe}}, {{hair_style}}, and {{beauty_detail}}"
+  - "{{paired_subject}} with {{hair_style}}, wearing {{layered_wardrobe}} and {{beauty_detail}}"
+  - "{{paired_subject}} in {{layered_wardrobe}} with {{hair_style}} and {{jewelry_detail}}"
+  - "{{paired_subject}} styled in {{layered_wardrobe}}, {{hair_style}}, and {{beauty_detail}}"
 
 opening_line:
   - "{{time_slice:propercase}}, {{lead_subject}}."
   - "{{lead_subject:propercase}}."
+
+subject_clause:
+  - "{{opening_line}}"
+  - "{{opening_line}} Their styling resolves around {{color_story}}."
 
 interaction_line:
   - "They move in mirrored rhythm as they {{posture_dynamic}}, their {{skin_state}} skin catching the light."
   - "They hold the frame as they {{posture_dynamic}}, with {{expression_phrase}}."
   - "They share the same frame as they {{posture_dynamic}}, with {{skin_state}} skin and {{expression_phrase}}."
 
+blocking_clause:
+  - "{{interaction_line}}"
+  - "{{interaction_line}} {{micro_gesture:propercase}}."
+
 environment_line:
   - "They stand inside {{environment_feature}}, with {{emission_detail}} and {{graffiti_panel}} nearby."
   - "Around them is {{environment_feature}}, where {{emission_detail}} reveals {{graffiti_panel}}."
   - "The setting is {{environment_feature}}, marked by {{transit_memory}} and {{emission_detail}}."
+
+environment_clause:
+  - "{{environment_line}}"
+  - "{{environment_line}} Nearby: {{set_dressing_line}}."
+  - "{{environment_line}} {{texture_clause}}"
 
 detail_line:
   - "A flash of {{accent_trim}} breaks the silhouette."
   - "{{camera_tag:propercase}}."
   - "{{prop_detail:propercase}}."
 
+detail_clause:
+  - "{{detail_line}}"
+  - "{{detail_line}} {{optional_overlay}}"
+
 style_line:
   - "The image feels tactile, nocturnal, and emotionally precise under {{lighting_style}}."
   - "The frame stays cinematic and tense under {{lighting_style}}, with surfaces built from {{base_surface}}."
   - "The composition settles into {{frame_composition}}, dense with {{atmosphere_particle}} and {{reflection_quality}}."
+
+camera_clause:
+  - "Camera behavior stays {{camera_behavior}}."
+  - "The shot reads as {{camera_behavior}}, tuned to {{lighting_style}}."
+  - "Camera behavior stays {{camera_behavior}}, chasing {{skin_highlight}}."
 
 micro_line:
   - "{{micro_gesture:propercase}}."
   - "The palette resolves as {{color_story}}."
   - "The mood lingers {{story_implication}}."
 
+closing_clause:
+  - "{{micro_line}}"
+  - "{{micro_line}} {{optional_coda}}"
+  - "{{micro_line}} {{grade_clause}} {{optional_coda}}"
+
 scene_cut:
-  - "{{opening_line}} {{interaction_line}} {{environment_line}} {{detail_line}} {{style_line}} {{micro_line}}"
-  - "{{opening_line}} {{environment_line}} {{interaction_line}} {{style_line}} {{detail_line}} {{micro_line}}"
-  - "{{opening_line}} {{style_line}} {{environment_line}} {{interaction_line}} {{micro_line}} {{detail_line}}"
+  - "{{subject_clause}} {{blocking_clause}} {{environment_clause}} {{detail_clause}} {{style_line}} {{asymmetry_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{camera_clause}} {{grade_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{style_line}} {{environment_clause}} {{blocking_clause}} {{detail_clause}} {{texture_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{camera_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{asymmetry_clause}} {{closing_clause}}"
 
 # Level 1 - final engine
 prompt_path:
