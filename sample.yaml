@@ -1,0 +1,400 @@
+# Mustache sample inspired by docs/mustache_template_guide.yaml
+# Paste into the Mustache Variables node, then sample with Mustache Variable Sampler.
+
+# Level 4 - atoms
+subject_role:
+  - "performer"
+  - "dancer"
+  - "runaway"
+  - "courier"
+
+subject_build:
+  - "lean"
+  - "athletic"
+  - "wiry"
+  - "statuesque"
+
+dominant_color:
+  - "Crimson"
+  - "Petrol Blue"
+  - "Amber"
+  - "Acid Green"
+
+accent_color:
+  - "Silver"
+  - "Black"
+  - "Pearl"
+  - "Copper"
+
+lighting_color:
+  - "cyan"
+  - "sodium-orange"
+  - "magenta"
+  - "acid-green"
+
+material_base:
+  - "concrete"
+  - "tile"
+  - "steel"
+  - "glass block"
+
+material_modifier:
+  - "wet"
+  - "cracked"
+  - "rust-streaked"
+  - "smoke-stained"
+
+moisture_state:
+  - "wet"
+  - "sweaty"
+  - "slick"
+
+moisture_finish:
+  - "glistening"
+  - "glossy"
+  - "shiny"
+
+fabric_base:
+  - "satin"
+  - "latex"
+  - "mesh"
+  - "silk"
+
+fabric_finish:
+  - "liquid"
+  - "brushed"
+  - "creased"
+  - "mirrored"
+
+hair_length:
+  - "long"
+  - "shoulder-length"
+  - "close-cropped"
+
+hair_tone:
+  - "black"
+  - "brunette"
+  - "silver"
+  - "ink-blue"
+
+hair_motion:
+  - "falling over one eye"
+  - "slicked behind the ears"
+  - "lifting in the tunnel draft"
+
+expression_base:
+  - "focused"
+  - "defiant"
+  - "half-smiling"
+  - "distant"
+
+expression_intensity:
+  - "softly"
+  - "knowingly"
+  - "with exhausted confidence"
+
+gaze_target:
+  - "toward the camera"
+  - "past the lens"
+  - "into the reflected light"
+  - "toward each other"
+
+action_verb:
+  - "lean"
+  - "arch"
+  - "turn"
+  - "step"
+
+action_modifier:
+  - "toward the light"
+  - "against the wall"
+  - "through the haze"
+  - "into the reflected glow"
+
+motion_adverb:
+  - "carefully"
+  - "restlessly"
+  - "with measured confidence"
+  - "as if following music"
+
+contact_verb:
+  - "mirroring the other figure"
+  - "closing the distance"
+  - "trading weight from foot to foot"
+
+camera_family:
+  - "arri"
+  - "sony"
+  - "red"
+  - "fuji"
+
+lens_type:
+  - "50mm lens"
+  - "85mm lens"
+  - "anamorphic lens"
+
+lens_modifier:
+  - "fogged "
+  - "rain-speckled "
+  - "scratched "
+
+atmosphere_particle:
+  - "steam"
+  - "dust"
+  - "mist"
+  - "smoke"
+
+reflection_quality:
+  - "broken reflections"
+  - "oily highlights"
+  - "ghosted silhouettes"
+  - "soft mirror flare"
+
+architecture_base:
+  - "service tunnel"
+  - "subway corridor"
+  - "boiler room"
+  - "maintenance bay"
+
+architecture_condition:
+  - "abandoned"
+  - "echoing"
+  - "claustrophobic"
+  - "flood-marked"
+
+sound_detail:
+  - "dripping pipes"
+  - "distant rail noise"
+  - "electrical hum"
+  - "metallic rattling"
+
+temperature_detail:
+  - "cold condensation"
+  - "radiator heat"
+  - "humid air"
+  - "night chill"
+
+surface_prefix:
+  - "wet "
+  - "cracked "
+  - "powdered with chalk "
+  - "veiled in shadow "
+
+makeup_finish:
+  - "matte"
+  - "gloss"
+  - "metallic"
+
+jewelry_type:
+  - "ear cuff"
+  - "chain necklace"
+  - "stacked rings"
+
+metal_tone:
+  - "silver"
+  - "gunmetal"
+  - "copper"
+
+graffiti_style:
+  - "dripping handstyle"
+  - "layered stencil"
+  - "ghosted mural"
+
+emission_source:
+  - "a broken vending machine"
+  - "an exposed fluorescent strip"
+  - "a distant signal lamp"
+
+shot_frame:
+  - "waist-up frame"
+  - "three-quarter frame"
+  - "tight portrait"
+  - "wide cinematic frame"
+
+time_slice:
+  - "just before dawn"
+  - "deep into the night"
+  - "at the dead hour between trains"
+
+prop_object:
+  - "a crushed cigarette case"
+  - "a coil of headset cable"
+  - "a folded transit map"
+  - "a cracked motorcycle helmet"
+
+transit_trace:
+  - "faded platform numbers"
+  - "obsolete route diagrams"
+  - "peeling warning labels"
+  - "old ticket stubs trapped in drains"
+
+micro_gesture:
+  - "one hand hooked at the collar"
+  - "a shoulder turned into the light"
+  - "fingers brushing a necklace clasp"
+  - "a heel lifted off the wet floor"
+
+story_implication:
+  - "as if they arrived mid-escape"
+  - "like the aftermath of a private performance"
+  - "as though the tunnel itself is listening"
+  - "with the hush of a covert rendezvous"
+
+# Level 3 - molecules
+skin_state:
+  - "{{moisture_state}}"
+  - "{{moisture_finish}}"
+  - "{{moisture_state}} and {{moisture_finish}}"
+
+base_surface:
+  - "{{material_base}}"
+  - "{{material_modifier}} {{material_base}}"
+  - "{{lighting_color}}-washed {{material_base}}"
+
+surface_phrase:
+  - "{{surface_prefix:notrim}}{{material_base}}"
+  - "{{surface_prefix:notrim}}{{base_surface}}"
+
+wardrobe_material:
+  - "{{dominant_color:static,lowercase}} {{fabric_finish}} {{fabric_base}}"
+  - "{{accent_color:static,lowercase}} {{fabric_base}}"
+
+wardrobe_piece:
+  - "slip dress"
+  - "corset"
+  - "bodysuit"
+  - "jacket"
+
+wardrobe:
+  - "{{wardrobe_material}} {{wardrobe_piece}}"
+  - "{{wardrobe_material}} harness with {{accent_color:static,lowercase}} straps"
+
+accent_trim:
+  - "{{accent_color:lowercase}} piping"
+  - "{{accent_color:lowercase}} ribbon with {{accent_color:repeat,lowercase}} stitching"
+
+hair_style:
+  - "{{hair_length}} {{hair_tone}} hair"
+  - "{{hair_length}} {{hair_tone}} hair {{hair_motion}}"
+
+expression_detail:
+  - "{{expression_base}}"
+  - "{{expression_base}} {{expression_intensity}}"
+
+expression_phrase:
+  - "faces set in {{expression_detail}} focus"
+  - "expressions held {{expression_intensity}}"
+  - "eyes turned {{gaze_target}}"
+
+beauty_detail:
+  - "{{makeup_detail}}"
+  - "{{makeup_detail}} with {{accent_color:static,lowercase}} lacquered nails"
+  - "{{makeup_detail}} and {{jewelry_detail}}"
+
+makeup_detail:
+  - "{{dominant_color:static,lowercase}} {{makeup_finish}} lipstick"
+  - "{{accent_color:static,lowercase}} liner and {{accent_color:repeat,lowercase}} gloss"
+
+jewelry_detail:
+  - "{{metal_tone}} {{jewelry_type}}"
+  - "{{metal_tone}} {{jewelry_type}} catching {{lighting_color}} reflections"
+
+lens_detail:
+  - "{{lens_modifier:notrim}}{{lens_type}}"
+
+camera_tag:
+  - "shot on {{camera_family:uppercase}} through {{lens_detail}}"
+
+lighting_style:
+  - "{{lighting_color}} fluorescent haze"
+  - "{{lighting_color}} rim light over {{atmosphere_particle}}"
+  - "{{lighting_color}} neon spill with {{lighting_color:repeat}} reflections"
+
+posture_dynamic:
+  - "{{action_verb}} {{action_modifier}}"
+  - "{{action_verb}} {{action_modifier}} while {{contact_verb}}"
+  - "{{action_verb}} {{action_modifier}} {{motion_adverb}}"
+
+environment_feature:
+  - "{{architecture_condition}} {{architecture_base}} with {{sound_detail}}"
+  - "{{architecture_condition}} {{architecture_base}} full of {{atmosphere_particle}} and {{temperature_detail}}"
+
+transit_memory:
+  - "{{transit_trace}} along {{surface_phrase}}"
+  - "{{transit_trace}} beside {{surface_phrase}} and {{reflection_quality}}"
+
+graffiti_panel:
+  - "{{graffiti_style}} graffiti on {{base_surface}}"
+
+emission_detail:
+  - "{{emission_source}} casting {{lighting_color}} shadows"
+  - "{{emission_source}} turning the air into {{reflection_quality}}"
+
+frame_composition:
+  - "{{shot_frame}} under {{lighting_style}}"
+  - "{{shot_frame}} built around {{reflection_quality}}"
+  - "{{shot_frame}} with {{surface_phrase}} and {{atmosphere_particle}}"
+
+prop_detail:
+  - "{{prop_object}} dangling from one hand"
+  - "{{prop_object}} abandoned at the edge of frame"
+  - "{{prop_object}} catching stray {{lighting_color}} light"
+
+color_story:
+  - "{{dominant_color:lowercase}} against {{accent_color:lowercase}} accents"
+  - "{{dominant_color:lowercase}} wardrobe against {{lighting_color}} light"
+  - "{{accent_color:lowercase}} details echoing through {{lighting_color}} spill"
+
+# Level 2 - entities and scene components
+paired_subject:
+  - "a {{subject_role}} and a {{subject_role:repeat}} counterpart"
+  - "two {{subject_role}}s"
+  - "two {{subject_build}} {{subject_role}}s"
+
+lead_subject:
+  - "{{paired_subject}} with {{hair_style}}, wearing {{wardrobe}} and {{beauty_detail}}"
+  - "{{paired_subject}} in {{wardrobe}} with {{hair_style}} and {{jewelry_detail}}"
+  - "{{paired_subject}} styled in {{wardrobe}}, {{hair_style}}, and {{beauty_detail}}"
+
+opening_line:
+  - "{{time_slice:propercase}}, {{lead_subject}}."
+  - "{{lead_subject:propercase}}."
+
+interaction_line:
+  - "They move in mirrored rhythm as they {{posture_dynamic}}, their {{skin_state}} skin catching the light."
+  - "They hold the frame as they {{posture_dynamic}}, with {{expression_phrase}}."
+  - "They share the same frame as they {{posture_dynamic}}, with {{skin_state}} skin and {{expression_phrase}}."
+
+environment_line:
+  - "They stand inside {{environment_feature}}, with {{emission_detail}} and {{graffiti_panel}} nearby."
+  - "Around them is {{environment_feature}}, where {{emission_detail}} reveals {{graffiti_panel}}."
+  - "The setting is {{environment_feature}}, marked by {{transit_memory}} and {{emission_detail}}."
+
+detail_line:
+  - "A flash of {{accent_trim}} breaks the silhouette."
+  - "{{camera_tag:propercase}}."
+  - "{{prop_detail:propercase}}."
+
+style_line:
+  - "The image feels tactile, nocturnal, and emotionally precise under {{lighting_style}}."
+  - "The frame stays cinematic and tense under {{lighting_style}}, with surfaces built from {{base_surface}}."
+  - "The composition settles into {{frame_composition}}, dense with {{atmosphere_particle}} and {{reflection_quality}}."
+
+micro_line:
+  - "{{micro_gesture:propercase}}."
+  - "The palette resolves as {{color_story}}."
+  - "The mood lingers {{story_implication}}."
+
+scene_cut:
+  - "{{opening_line}} {{interaction_line}} {{environment_line}} {{detail_line}} {{style_line}} {{micro_line}}"
+  - "{{opening_line}} {{environment_line}} {{interaction_line}} {{style_line}} {{detail_line}} {{micro_line}}"
+  - "{{opening_line}} {{style_line}} {{environment_line}} {{interaction_line}} {{micro_line}} {{detail_line}}"
+
+# Level 1 - final engine
+prompt_path:
+  - "{{scene_cut}}":0.45
+  - "{{scene_cut}} {{micro_line}}":0.20
+  - "{{scene_cut}}":0.35
+
+final_prompt:
+  - "{{prompt_path}}"
