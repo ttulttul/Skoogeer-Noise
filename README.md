@@ -405,7 +405,7 @@ Parses a YAML mapping of variable names to candidate values and packages it as a
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `yaml_text` | `STRING` or `STRING` list | sample YAML | multiline | YAML mapping of variable names to values, or a YAML list of mappings. Lists of scalar values are the normal form for each variable; scalar values are accepted as shorthand and are wrapped into a one-item list. Each final value is coerced to text before rendering. When a list of YAML strings is provided, all mappings are merged together. |
-| `variables` | `MUSTACHE_VARIABLE_LIST` | – | optional | Optional concrete variable settings used to render the YAML before parsing it. This is the input to use when you want one `Mustache Variables` stage to templatize another one. Each entry renders the YAML once, and the parsed mappings are then merged together. |
+| `variables` | `MUSTACHE_VARIABLE_LIST` | – | optional | Optional second-stage templating input. In the normal case you define variables directly in `yaml_text` and reference them there. Connect this only when you want upstream concrete variable settings to render the YAML before it is parsed. |
 
 ##### Example YAML
 
@@ -419,7 +419,7 @@ leglength:
   - weird
 ```
 
-Local references can also expand earlier variables in the same YAML:
+Variables are normally defined and referenced inside the same YAML block:
 
 ```yaml
 color:
@@ -435,7 +435,7 @@ hairstyle:
   - {{color:static}} hair in a {{hairarrangement:static}}
 ```
 
-Lazy local references also support placeholder-level instance settings:
+Those same in-node references also support placeholder-level instance settings:
 
 ```yaml
 color:
@@ -454,12 +454,13 @@ pair:
 - Empty input returns an empty variable set.
 - Duplicate variable names within one YAML input now raise an error instead of being merged silently.
 - When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
-- If `variables` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used to render it first.
+- By default, `Mustache Variables` is self-contained: define the variables in `yaml_text`, and other entries in that same YAML can reference them directly.
+- If `variables` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used only as an extra pre-rendering source before parsing.
 - That pre-render is now partial: placeholders satisfied by the upstream `variables` input are rendered first, while unresolved placeholders are left in place for the later lazy local-reference pass.
 - This is the intended way to chain stages such as `Mustache Variables -> Mustache Variable Sampler -> Reorder List -> Mustache Variables`.
 - Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
 - Variable values may reference any other variable defined in the same YAML, regardless of source order. Those references stay lazy inside `MUSTACHE_VARIABLES` and are only rendered when `Mustache Variable Sampler` synthesizes concrete settings.
-- Local template references must point to variables defined somewhere in the same YAML or to values supplied through the optional `variables` input. Referencing a missing variable raises an error.
+- Local template references normally point to variables defined somewhere in that same YAML. The optional `variables` input only matters for chained or second-stage templating. Referencing a name that exists in neither place raises an error.
 - Placeholder instance settings are written inside the mustache expression, such as `{{color:static}}`, `{{color:repeat}}`, `{{color:lowercase}}`, `{{color:propercase}}`, `{{color:uppercase}}`, or `{{color:notrim}}`. Escape a literal colon in the variable name as `\:` if needed.
 - By default, placeholders trim surrounding whitespace from the filled-in value and use `randomize` behavior during lazy expansion. Use `notrim` to preserve surrounding whitespace and `static` to opt out of per-instantiation random choice.
 - Multiple compatible settings can be combined with commas, such as `{{color:static,lowercase}}` or `{{color:uppercase,notrim}}`.
