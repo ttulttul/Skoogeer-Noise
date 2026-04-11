@@ -447,6 +447,20 @@ pair:
   - {{color}} hair with {{color:repeat}} eyes
 ```
 
+##### Placeholder Operators
+
+| Operator | Effect | Notes |
+|------|------|------|
+| `randomize` | Choose a fresh random value during lazy expansion. | Default lazy selection mode. |
+| `static` | Use the already-resolved value for that variable. | Use this when you do not want per-instantiation random reselection. |
+| `repeat` | Reuse the most recent lazy choice for that variable in the same template render. | Useful after a randomized occurrence of the same variable. |
+| `lowercase` | Convert the filled-in value to lowercase. | Mutually exclusive with `propercase` and `uppercase`. |
+| `propercase` | Uppercase the first character of the filled-in value. | Mutually exclusive with `lowercase` and `uppercase`. |
+| `uppercase` | Convert the filled-in value to uppercase. | Mutually exclusive with `lowercase` and `propercase`. |
+| `notrim` | Preserve leading and trailing whitespace. | By default, placeholders trim surrounding whitespace after lookup. |
+
+Operators can be combined when they do not conflict, for example `{{color:static,lowercase}}` or `{{color:uppercase,notrim}}`.
+
 ##### Notes
 
 - YAML must parse to a mapping or to a list of mappings at the top level.
