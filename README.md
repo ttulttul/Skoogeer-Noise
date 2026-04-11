@@ -461,6 +461,37 @@ pair:
 
 Operators can be combined when they do not conflict, for example `{{color:static,lowercase}}` or `{{color:uppercase,notrim}}`.
 
+`static` and `repeat` are different:
+
+- `static` means "use the current resolved value for this variable." It does not make a new random choice.
+- `repeat` means "reuse the most recent lazy choice for this variable made earlier in the same template render."
+
+Example with `repeat`:
+
+```yaml
+color:
+  - brown
+  - blue
+
+pair:
+  - {{color}} hair with {{color:repeat}} eyes
+```
+
+Here `{{color}}` uses the default lazy `randomize` behavior, and `{{color:repeat}}` reuses that same sampled color.
+
+Example with `static`:
+
+```yaml
+color:
+  - brown
+  - blue
+
+pair:
+  - {{color:static}} hair with {{color:static}} eyes
+```
+
+Here both placeholders use the already-resolved `color` value from the current variable setting. `static` does not create a fresh lazy random choice on its own.
+
 ##### Notes
 
 - YAML must parse to a mapping or to a list of mappings at the top level.
