@@ -514,7 +514,8 @@ Here both placeholders use the already-resolved `color` value from the current v
 - `randomize` is the default lazy selection mode and draws a fresh seeded random value from that variable's full value list during lazy rendering. `static` uses the already-resolved variable value instead, and `repeat` reuses the most recent lazy choice for that variable earlier in the same template render.
 - `lowercase`, `propercase`, `uppercase`, and the default trim behavior transform the filled-in value after lookup.
 - `randomize`, `repeat`, and `static` are mutually exclusive selection actions, and `lowercase`, `propercase`, and `uppercase` are mutually exclusive case transforms. Invalid combinations raise an error.
-- Random weights can be attached to a variable value by appending `:probability` to the end of the scalar, for example `black:0.4`.
+- Random weights can be attached to a variable value by appending `:probability` to the end of the scalar, for example `black:0.4` or `"soft blue:0.4"`.
+- If the YAML scalar itself needs quotes, keep the weight inside the quotes for canonical YAML, for example `"my item:0.3"`. The parser also accepts the shorthand `"my item":0.3` and normalizes it before YAML parsing.
 - If only some values for a variable use a `:probability` suffix, the unspecified values split the remaining probability mass evenly. If every value is weighted explicitly, their probabilities must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
 - The `variables` input tolerates nested list wrappers from upstream list utilities and concatenation nodes, as long as the leaves are variable-setting dictionaries.

@@ -37,6 +37,7 @@ _YAML_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _VARIABLE_WEIGHTS_KEY = "__mustache_weights__"
 _VARIABLE_TEMPLATE_SPECS_KEY = "__mustache_template_specs__"
 _WEIGHTED_VALUE_PATTERN = re.compile(r"^(.*?):([0-9]*\.?[0-9]+)\s*$")
+_QUOTED_WEIGHT_SUFFIX_PATTERN = re.compile(r"^(\s*):\s*([0-9]*\.?[0-9]+)\s*(#.*)?$")
 _WEIGHT_TOLERANCE = 1e-6
 _RESERVED_VARIABLE_KEYS = {_VARIABLE_WEIGHTS_KEY, _VARIABLE_TEMPLATE_SPECS_KEY}
 _TEMPLATE_INSTANCE_SETTINGS = {"repeat", "randomize", "static", "lowercase", "propercase", "uppercase", "notrim"}
@@ -376,6 +377,82 @@ def _collect_parsed_mustache_variable_definitions(parsed, *, collected: Dict[str
         collected[key] = raw_values
 
 
+def _find_yaml_quoted_scalar_end(text: str) -> int | None:
+    if not text or text[0] not in {"'", '"'}:
+        return None
+
+    quote = text[0]
+    index = 1
+    while index < len(text):
+        if quote == '"':
+            if text[index] == "\\":
+                index += 2
+                continue
+            if text[index] == quote:
+                return index
+            index += 1
+            continue
+
+        if text[index] == quote:
+            if index + 1 < len(text) and text[index + 1] == quote:
+                index += 2
+                continue
+            return index
+        index += 1
+    return None
+
+
+def _normalize_quoted_weight_suffix_remainder(remainder: str) -> str:
+    if not remainder or remainder[0] not in {"'", '"'}:
+        return remainder
+
+    quote_end = _find_yaml_quoted_scalar_end(remainder)
+    if quote_end is None:
+        return remainder
+
+    trailing = remainder[quote_end + 1 :]
+    match = _QUOTED_WEIGHT_SUFFIX_PATTERN.fullmatch(trailing)
+    if match is None:
+        return remainder
+
+    comment = ""
+    if match.group(3):
+        comment = f" {match.group(3).lstrip()}"
+    return f"{remainder[:quote_end]}:{match.group(2)}{remainder[quote_end:quote_end + 1]}{comment}"
+
+
+def _normalize_quoted_weight_suffixes(yaml_text: str) -> str:
+    normalized_lines: List[str] = []
+    for line in str(yaml_text).splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            normalized_lines.append(line)
+            continue
+
+        prefix = None
+        remainder = None
+        list_match = re.match(r"^(\s*-\s)(.*)$", line)
+        if list_match is not None:
+            prefix = list_match.group(1)
+            remainder = list_match.group(2)
+        else:
+            mapping_match = re.match(r"^(\s*[^:\n]+:\s)(.*)$", line)
+            if mapping_match is not None:
+                prefix = mapping_match.group(1)
+                remainder = mapping_match.group(2)
+
+        if prefix is None or remainder is None:
+            normalized_lines.append(line)
+            continue
+
+        normalized_lines.append(prefix + _normalize_quoted_weight_suffix_remainder(remainder))
+
+    normalized_text = "\n".join(normalized_lines)
+    if str(yaml_text).endswith("\n"):
+        normalized_text += "\n"
+    return normalized_text
+
+
 def _quote_yaml_scalars(yaml_text: str, *, require_mustache: bool) -> str:
     quoted_lines: List[str] = []
     for line in str(yaml_text).splitlines():
@@ -436,7 +513,8 @@ def _construct_yaml_value(loader: yaml.Loader, node):
 
 
 def _load_yaml_preserving_top_level_order(yaml_text: str):
-    quoted_text = _quote_mustache_yaml_scalars(yaml_text)
+    normalized_text = _normalize_quoted_weight_suffixes(yaml_text)
+    quoted_text = _quote_mustache_yaml_scalars(normalized_text)
     loader = _YAML_SAFE_LOADER(quoted_text)
     try:
         root = loader.get_single_node()

@@ -201,6 +201,20 @@ def test_parse_mustache_variables_yaml_distributes_remaining_weight_across_unwei
     assert weights == pytest.approx([0.25, 0.25, 0.5])
 
 
+def test_parse_mustache_variables_yaml_accepts_quoted_weight_shorthand():
+    variables = parse_mustache_variables_yaml(
+        "lens_effect:\n"
+        '  - " with shallow focus":0.2\n'
+        '  - " with motion blur":0.1\n'
+        '  - "":0.7\n'
+    )
+
+    assert variables["lens_effect"] == [" with shallow focus", " with motion blur", ""]
+
+    weights = variables["__mustache_weights__"]["lens_effect"]
+    assert weights == pytest.approx([0.2, 0.1, 0.7])
+
+
 def test_parse_mustache_variables_yaml_rejects_weight_total_above_one():
     with pytest.raises(ValueError, match="weights must not exceed 1.0"):
         parse_mustache_variables_yaml(

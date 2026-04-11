@@ -263,12 +263,12 @@ Interpretation:
 *   `notrim` is for deliberate token gluing, not general text cleanup.
 
 ### 3. Probability Weights
-You can attach weights to individual list items by appending `:probability`. Fully weighted lists must sum to `1.0`. If only some entries are weighted, the remaining probability mass is split evenly across the unweighted entries.
+You can attach weights to individual list items by appending `:probability`. Fully weighted lists must sum to `1.0`. If only some entries are weighted, the remaining probability mass is split evenly across the unweighted entries. When the YAML scalar itself needs quotes, the canonical YAML form keeps the weight inside those quotes, such as `"my item:0.3"`. The parser also accepts the shorthand `"my item":0.3`.
 
 ```yaml
 lens_effect:
-  - " with shallow focus":0.2
-  - " with motion blur":0.1
+  - " with shallow focus:0.2"
+  - " with motion blur:0.1"
   - ":0.7"  # 70% chance of outputting absolutely nothing!
 ```
 
