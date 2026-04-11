@@ -397,7 +397,7 @@ This is the MurmurHash3 64-bit finalizer, used here as a strong bit-mixing funct
 
 Parses a YAML mapping of variable names to candidate values and packages it as a `MUSTACHE_VARIABLES` dictionary for downstream templating nodes.
 
-For a workflow-oriented walkthrough, see [`docs/mustache_template_guide.yaml`](docs/mustache_template_guide.yaml).
+For a workflow-oriented walkthrough with recursive-template patterns and operator usage, see [`docs/mustache_template_guide.yaml`](docs/mustache_template_guide.yaml).
 
 - **Menu category:** `text/template`
 - **Returns:** `MUSTACHE_VARIABLES`

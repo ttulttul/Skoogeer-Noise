@@ -87,6 +87,11 @@ generate simple or wildly complex descriptions.
 *Note: In this guide, plain `{{variable}}` already uses lazy randomization by default. Use `:static` only when you want to bind to an already-resolved value instead of making a fresh lazy choice.*
 
 ```yaml
+dominant_color:
+  - "Crimson"
+  - "Deep Blue"
+  - "Neon Green"
+
 skin_state:
   - "{{moisture_state}}"
   - "{{moisture_finish}}"
@@ -96,7 +101,19 @@ base_surface:
   - "{{material_base}}"
   - "{{material_modifier}} {{material_base}}"
   - "{{color_base}} {{material_base}}"
+
+wardrobe:
+  - "{{dominant_color:static,lowercase}} satin dress"
+  - "{{dominant_color:static,lowercase}} leather corset"
+
+accent_ribbon:
+  - "{{dominant_color}} ribbon with {{dominant_color:repeat}} stitching"
 ```
+
+Notice the operator choices:
+
+*   `:static,lowercase` keeps `wardrobe` locked to the already-resolved `dominant_color`, but formats it naturally for mid-sentence use.
+*   `:repeat` makes `"Crimson ribbon with Crimson stitching"` possible without a second random draw drifting to a different color.
 
 ---
 
@@ -118,7 +135,12 @@ action_modifier:
 
 posture_dynamic:
   - "{{action_verb}} {{action_modifier}}"
+
+paired_subject:
+  - "a {{subject_role}} and her {{subject_role:repeat}} counterpart"
 ```
+
+Here `paired_subject` uses `:repeat` so a prompt can stay internally coherent when the same lazy choice should show up twice.
 
 ---
 
@@ -135,7 +157,7 @@ output: *"She wears a red bra. They kiss, her red bra catching the light."*
 ```yaml
 # Strict Focus: Looks & Wardrobe
 woman_look:
-  - "{{spatial_position:propercase}}, a {{woman}} features {{hair_style}}, dressed in {{wardrobe}}."
+  - "{{spatial_position:propercase}}, a {{woman}} features {{hair_style}}, dressed in {{wardrobe}} with {{dominant_color:static,lowercase}} lipstick."
 
 # Strict Focus: Actions
 woman_solo_action:
@@ -144,7 +166,26 @@ woman_solo_action:
 # Strict Focus: Environment
 backdrop:
   - "set against {{base_surface}} walls in a {{atmosphere}}."
+
+# Strict Focus: Micro details that need whitespace glue
+lens_type:
+  - "50mm lens"
+  - "85mm lens"
+
+lens_modifier:
+  - "cracked "
+  - "fogged "
+  - "dusty "
+
+lens_detail:
+  - "{{lens_modifier:notrim}}{{lens_type}}"
 ```
+
+This is where operators stop being cosmetic and start protecting grammar:
+
+*   `:propercase` is perfect for sentence starts.
+*   `:static,lowercase` keeps a reused resolved value readable in the middle of a clause.
+*   `:notrim` lets you intentionally preserve glue spaces when two variables need to concatenate into one phrase.
 
 ---
 
@@ -169,7 +210,7 @@ generated_prompt:
 
 # 3. The Final Output
 final_prompt:
-  - "({{generated_prompt}}) ({{cinematography_style}})"
+  - "({{generated_prompt}}) ({{cinematography_style}}) (shot on {{camera_family:uppercase}})"
 ```
 
 ---
@@ -192,6 +233,35 @@ commas (e.g., `{{variable:static,lowercase}}`).
 *   `{{word:uppercase}}` - Forces the output to ALL CAPS.
 *   `{{word:notrim}}` - By default, engines trim leading and trailing whitespace from variables. If you intentionally leave a space inside your variable (e.g., `- "cracked "`), use `:notrim` so it blends perfectly into the next word: `{{modifier:notrim}}{{lens_type}}` outputs `"cracked 50mm lens"`.
 
+### 2.5 Practical Operator Patterns
+These patterns are where the operators become genuinely useful:
+
+```yaml
+headline:
+  - "{{scene_type:propercase}} under {{lighting_color:lowercase}} light"
+
+matched_palette:
+  - "{{dominant_color}} silk with {{dominant_color:repeat}} satin trim"
+
+coherent_makeup:
+  - "{{dominant_color:static,lowercase}} lipstick"
+
+technical_tag:
+  - "{{camera_family:uppercase}} render"
+
+joined_phrase:
+  - "{{surface_prefix:notrim}}{{surface_material}}"
+```
+
+Interpretation:
+
+*   `propercase` fixes sentence openings without forcing you to capitalize the whole source pool.
+*   `lowercase` makes title-cased pools safe to inject into clauses.
+*   `repeat` is for "same fresh choice again in this one template."
+*   `static` is for "reuse the resolved variable that already belongs to this sampled setting."
+*   `uppercase` is useful for technical tags, camera families, or stylized labels.
+*   `notrim` is for deliberate token gluing, not general text cleanup.
+
 ### 3. Probability Weights
 You can attach weights to individual list items by appending `:probability`. Fully weighted lists must sum to `1.0`. If only some entries are weighted, the remaining probability mass is split evenly across the unweighted entries.
 
@@ -209,3 +279,5 @@ lens_effect:
 1.  **Watch out for Root Word Clashes:** If you hardcode `"reflecting the environment"` in Level 1, make sure the word `"reflective"` doesn't exist in your Level 4 pools, or you will generate *"reflective skin reflecting the environment"*.
 2.  **Null Weights are your Friend:** Always include empty strings (`- ":0.5"`) in modifier lists. If every single item always has a modifier, your prompts become bloated and look "AI-generated." Silence is just as important as description.
 3.  **Use Compound Nodes for High-End AI Triggers:** AI models love contrasting colors. Instead of just picking one color for lighting, build a molecule that occasionally feeds the AI two colors (e.g., `{{color}} and {{color}} lighting`). This triggers advanced cinematic grading in models like Midjourney and Stable Diffusion.
+4.  **Reserve `static` for consistency, not variety:** If two clauses should talk about the same already-sampled concept, use `:static`. If you actually want a new roll, leave the placeholder plain.
+5.  **Reserve `repeat` for same-template echoes:** `repeat` only makes sense after the same variable has already been drawn earlier in the same lazy render. Use it when you want "the same random choice again right now," not when you want to bind to a top-level resolved field.
