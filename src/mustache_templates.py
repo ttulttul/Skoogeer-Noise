@@ -28,6 +28,8 @@ _DEFAULT_VARIABLES_YAML = (
     "  - long\n"
     "  - weird\n"
 )
+_DEFAULT_SINGLE_VARIABLE_KEY = "animal"
+_DEFAULT_SINGLE_VARIABLE_VALUE = "fox"
 _DEFAULT_TEMPLATE = "The man has {{haircolor}} hair and {{leglength}} legs."
 _MUSTACHE_VARIABLE_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
 _SAMPLING_METHODS = ("sequential", "random")
@@ -595,6 +597,50 @@ def parse_mustache_variables_inputs(yaml_inputs: Sequence[str] | str) -> Mustach
         )
 
     return merged_variables
+
+
+def _unwrap_single_input_value(value, *, input_name: str):
+    unwrapped = value
+    while isinstance(unwrapped, list):
+        if len(unwrapped) != 1:
+            raise ValueError(f"{input_name} input must resolve to a single value, got {len(unwrapped)} items.")
+        unwrapped = unwrapped[0]
+    return unwrapped
+
+
+def _normalize_mustache_variable_key_input(key) -> str:
+    raw_key = _unwrap_single_input_value(key, input_name="Mustache variable key")
+    variable_name = str(raw_key).strip()
+    if not variable_name:
+        raise ValueError("Mustache variable key must be non-empty.")
+    if variable_name in _RESERVED_VARIABLE_KEYS:
+        raise ValueError(f"Mustache variable name '{variable_name}' is reserved.")
+    _raise_for_unresolved_mustache_variables(variable_name, context="Mustache variable key")
+    return variable_name
+
+
+def _flatten_mustache_variable_value_input(value, *, variable_name: str, flattened: List[str]) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _flatten_mustache_variable_value_input(item, variable_name=variable_name, flattened=flattened)
+        return
+
+    flattened.append(_coerce_yaml_scalar_to_string(value, variable_name=variable_name))
+
+
+def build_mustache_variable(key, value) -> MustacheVariablesDict:
+    variable_name = _normalize_mustache_variable_key_input(key)
+    values: List[str] = []
+    _flatten_mustache_variable_value_input(value, variable_name=variable_name, flattened=values)
+    if not values:
+        raise ValueError(f"Mustache variable '{variable_name}' must contain at least one value.")
+
+    logger.debug(
+        "Built mustache variable '%s' with %d candidate values.",
+        variable_name,
+        len(values),
+    )
+    return {variable_name: values}
 
 
 def _flatten_mustache_variable_list_input(variables, flattened: MustacheVariableList) -> None:
@@ -1423,6 +1469,42 @@ class MustacheVariables:
         return (variables,)
 
 
+class MustacheVariable:
+    CATEGORY = "text/template"
+    RETURN_TYPES = ("MUSTACHE_VARIABLES",)
+    RETURN_NAMES = ("variables",)
+    INPUT_IS_LIST = (False, True)
+    FUNCTION = "build"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "key": ("STRING", {
+                    "default": _DEFAULT_SINGLE_VARIABLE_KEY,
+                    "tooltip": "Variable name to define in the returned MUSTACHE_VARIABLES mapping.",
+                }),
+                "value": ("STRING", {
+                    "default": _DEFAULT_SINGLE_VARIABLE_VALUE,
+                    "multiline": True,
+                    "tooltip": (
+                        "Value or list-valued STRING input to store under key. A scalar becomes a single-item "
+                        "candidate list; a connected STRING list becomes multiple candidate values."
+                    ),
+                }),
+            },
+        }
+
+    def build(self, key, value):
+        variables = build_mustache_variable(key, value)
+        logger.debug(
+            "MustacheVariable node produced %d key with %d candidate values.",
+            len(_visible_mustache_variable_keys(variables)),
+            len(next(iter(variables.values()))) if variables else 0,
+        )
+        return (variables,)
+
+
 class MustacheVariableSampler:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
@@ -1667,6 +1749,7 @@ NODE_CLASS_MAPPINGS = {
     "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
     "MergeMustacheVariableLists": MergeMustacheVariableLists,
+    "MustacheVariable": MustacheVariable,
     "MustacheVariables": MustacheVariables,
     "MustacheVariableSampler": MustacheVariableSampler,
     "MustacheTemplate": MustacheTemplate,
@@ -1677,6 +1760,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
     "MergeMustacheVariableLists": "Merge Mustache Variable Lists",
+    "MustacheVariable": "Mustache Variable",
     "MustacheVariables": "Mustache Variables",
     "MustacheVariableSampler": "Mustache Variable Sampler",
     "MustacheTemplate": "Mustache Template",

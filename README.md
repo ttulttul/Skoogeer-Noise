@@ -147,6 +147,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Latent Noise](#latent-noise) | `latent/perturb` | `LATENT` |
 | [Image Noise](#image-noise) | `image/perturb` | `IMAGE` |
 | [Next Seeds](#next-seeds) | `utils/seed` | `INT`, `INT`, `INT`, `INT` |
+| [Mustache Variable](#mustache-variable) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variables](#mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
@@ -392,6 +393,32 @@ This is the MurmurHash3 64-bit finalizer, used here as a strong bit-mixing funct
 ---
 
 ### Text Templates
+
+#### Mustache Variable
+
+Builds a one-key `MUSTACHE_VARIABLES` mapping without writing YAML manually. Use it when you already have a variable name and either one string or a list-valued `STRING` input that should become that variable's candidate values.
+
+- **Menu category:** `text/template`
+- **Returns:** `MUSTACHE_VARIABLES`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `key` | `STRING` | `animal` | – | Variable name to define. The key is trimmed, must be non-empty, and cannot use reserved/internal names. |
+| `value` | `STRING` or `STRING` list | `fox` | multiline | Scalar values are wrapped into a one-item candidate list. If a list-valued `STRING` input is connected, every item becomes one candidate value under `key`, in order. |
+
+##### Example
+
+- `key = animal`, `value = fox` returns `{"animal": ["fox"]}`
+- `key = animal`, `value = ["fox", "wolf", "cat"]` returns `{"animal": ["fox", "wolf", "cat"]}`
+
+##### Notes
+
+- This node returns `MUSTACHE_VARIABLES`, not `MUSTACHE_VARIABLE_LIST`. Feed it into `Mustache Variable Sampler` when you want concrete per-entry settings.
+- It is useful as a bridge from list-valued text outputs into the mustache-variable pipeline without going through YAML.
+
+---
 
 #### Mustache Variables
 

@@ -11,6 +11,7 @@ from src.mustache_templates import (  # noqa: E402
     ConcatenateLists,
     JoinTextList,
     MergeMustacheVariableLists,
+    MustacheVariable,
     MustacheTemplate,
     MustacheVariableSampler,
     MustacheVariables,
@@ -960,6 +961,34 @@ def test_second_stage_mustache_variables_workflow_uses_upstream_variable_setting
         "camera_lens": ["85mm", "35mm"],
         "prompt": ["portrait of a fox", "portrait of a fox"],
     }
+
+
+def test_mustache_variable_node_wraps_single_value_in_mustache_variables():
+    node = MustacheVariable()
+
+    (variables,) = node.build("animal", "fox")
+
+    assert node.INPUT_IS_LIST == (False, True)
+    assert variables == {
+        "animal": ["fox"],
+    }
+
+
+def test_mustache_variable_node_accepts_list_valued_string_input():
+    node = MustacheVariable()
+
+    (variables,) = node.build("animal", ["fox", "wolf", "cat"])
+
+    assert variables == {
+        "animal": ["fox", "wolf", "cat"],
+    }
+
+
+def test_mustache_variable_node_rejects_multi_item_key_input():
+    node = MustacheVariable()
+
+    with pytest.raises(ValueError, match="key input must resolve to a single value"):
+        node.build(["animal", "lens"], "fox")
 
 
 def test_mustache_variable_sampler_returns_variable_list():
