@@ -223,10 +223,95 @@ shot_frame:
   - "tight portrait"
   - "wide cinematic frame"
 
-time_slice:
-  - "just before dawn"
-  - "deep into the night"
+light_quality:
+  - amber
+  - leaden
+  - violet
+  - neon-soaked
+  - sepia-toned
+  - clinical
+  - iridescent
+  - harsh
+  - soft-focus
+  - silvered
+
+temporal_adjective:
+  - fleeting
+  - eerie
+  - cinematic
+  - lonely
+  - chaotic
+  - sterile
+  - rhythmic
+  - hazy
+  - pulse-pounding
+  - dead
+
+celestial_event:
+  - "the blue hour"
+  - "golden hour"
+  - "astronomical midnight"
+  - "civil twilight"
+  - "solar noon"
+  - "the spring equinox"
+  - "a blood moon"
+  - "totality"
+  - "nautical dusk"
+  - "the gloaming"
+
+urban_pulse:
+  - "the morning commute"
+  - "the graveyard shift"
+  - "the Friday night rush"
+  - "the last call at the bars"
+  - "the shift change at the docks"
+  - "the school run"
+  - "the siesta hours"
+  - "the cleaning of the subway tracks"
+  - "the streetlights humming to life"
+  - "the mid-afternoon lull"
+
+weather_state:
+  - "a summer heatwave"
+  - "a sudden downpour"
+  - "a winter blizzard"
+  - "thick coastal fog"
+  - "a pre-storm sky"
+  - "a lightning strike"
+  - "the first autumn frost"
+  - "humid valley mist"
+
+spatial_context:
+  - "over the city skyline"
+  - "within a deserted alley"
+  - "across the mountain peaks"
+  - "along the lonely coastline"
+  - "inside a 24-hour laundromat"
+  - "under the highway overpass"
+  - "through the canopy of a dark forest"
   - "at the dead hour between trains"
+
+time_slice:
+  - "the {{light_quality}} glow of {{celestial_event}}"
+  - "the {{temporal_adjective}} moment of {{urban_pulse}}"
+  - "{{weather_state}} during {{celestial_event}}"
+  - "{{temporal_adjective}} stillness {{spatial_context}}"
+  - "the {{light_quality}} clarity of {{weather_state}}"
+  - "the transition between {{celestial_event}} and {{urban_pulse}}"
+  - "the {{temporal_adjective}} {{light_quality}} light {{spatial_context}}"
+  - "exactly ten minutes before {{celestial_event}}"
+  - "the peak of {{urban_pulse}} under {{weather_state}}"
+  - "the {{light_quality}} reflections during {{urban_pulse}}"
+  - "the {{temporal_adjective}} stretch of {{celestial_event}} {{spatial_context}}"
+  - "the {{light_quality}} flicker of {{urban_pulse}} {{spatial_context}}"
+  - "the instant of {{celestial_event}} in the middle of {{weather_state}}"
+  - "the {{temporal_adjective}} silence after {{urban_pulse}}"
+  - "the {{light_quality}} haze of {{weather_state}} {{spatial_context}}"
+  - "the {{temporal_adjective}} blue of {{celestial_event}} {{spatial_context}}"
+  - "the {{light_quality}} shadows cast during {{celestial_event}}"
+  - "the {{temporal_adjective}} pulse of {{urban_pulse}}"
+  - "a {{light_quality}} wash of light during {{weather_state}}"
+  - "the {{temporal_adjective}} window when {{celestial_event}} hits {{spatial_context}}"
 
 prop_object:
   - "a crushed cigarette case"
