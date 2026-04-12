@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.mustache_templates import (  # noqa: E402
     ConcatenateLists,
     JoinTextList,
+    MergeMustacheVariables,
     MergeMustacheVariableLists,
     MustacheVariable,
     MustacheTemplate,
@@ -989,6 +990,71 @@ def test_mustache_variable_node_rejects_multi_item_key_input():
 
     with pytest.raises(ValueError, match="key input must resolve to a single value"):
         node.build(["animal", "lens"], "fox")
+
+
+def test_merge_mustache_variables_keep_first_preserves_first_conflict():
+    node = MergeMustacheVariables()
+
+    (variables,) = node.merge(
+        {"animal": ["fox"], "lens": ["35mm"]},
+        {"animal": ["wolf"], "lighting": ["moody"]},
+        "keep_first",
+    )
+
+    assert variables == {
+        "animal": ["fox"],
+        "lens": ["35mm"],
+        "lighting": ["moody"],
+    }
+
+
+def test_merge_mustache_variables_keep_second_overwrites_conflict():
+    node = MergeMustacheVariables()
+
+    (variables,) = node.merge(
+        {"animal": ["fox"], "lens": ["35mm"]},
+        {"animal": ["wolf"], "lighting": ["moody"]},
+        "keep_second",
+    )
+
+    assert variables == {
+        "animal": ["wolf"],
+        "lens": ["35mm"],
+        "lighting": ["moody"],
+    }
+
+
+def test_merge_mustache_variables_merge_values_appends_conflicting_values():
+    node = MergeMustacheVariables()
+
+    (variables,) = node.merge(
+        {"animal": ["fox"], "lens": ["35mm"]},
+        {"animal": ["wolf", "cat"], "lighting": ["moody"]},
+        "merge_values",
+    )
+
+    assert variables == {
+        "animal": ["fox", "wolf", "cat"],
+        "lens": ["35mm"],
+        "lighting": ["moody"],
+    }
+
+
+def test_merge_mustache_variables_merge_values_rejects_weighted_conflicts():
+    node = MergeMustacheVariables()
+    left = parse_mustache_variables_yaml(
+        "animal:\n"
+        "  - fox:0.7\n"
+        "  - wolf:0.3\n"
+    )
+    right = parse_mustache_variables_yaml(
+        "animal:\n"
+        "  - cat:0.6\n"
+        "  - dog:0.4\n"
+    )
+
+    with pytest.raises(ValueError, match="cannot be merged across multiple definitions when weighted values are in use"):
+        node.merge(left, right, "merge_values")
 
 
 def test_mustache_variable_sampler_returns_variable_list():

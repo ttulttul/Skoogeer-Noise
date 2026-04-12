@@ -149,6 +149,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Next Seeds](#next-seeds) | `utils/seed` | `INT`, `INT`, `INT`, `INT` |
 | [Mustache Variable](#mustache-variable) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variables](#mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
+| [Merge Mustache Variables](#merge-mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
 | [Join Text List](#join-text-list) | `text/debug` | `STRING`, `INT` |
@@ -547,6 +548,36 @@ Here both placeholders use the already-resolved `color` value from the current v
 - If only some values for a variable use a `:probability` suffix, the unspecified values split the remaining probability mass evenly. If every value is weighted explicitly, their probabilities must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
 - The `variables` input tolerates nested list wrappers from upstream list utilities and concatenation nodes, as long as the leaves are variable-setting dictionaries.
+
+---
+
+#### Merge Mustache Variables
+
+Merges two `MUSTACHE_VARIABLES` mappings into one. Use this when two branches define candidate pools and you want one combined variable-definition dictionary before `Mustache Variable Sampler`.
+
+- **Menu category:** `text/template`
+- **Returns:** `MUSTACHE_VARIABLES`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `variables_1` | `MUSTACHE_VARIABLES` | – | – | First variable-definition mapping. |
+| `variables_2` | `MUSTACHE_VARIABLES` | – | – | Second variable-definition mapping. |
+| `conflict_mode` | enum | `keep_first` | `keep_first/keep_second/merge_values` | Conflict policy for duplicate variable names. |
+
+##### Conflict Modes
+
+| Mode | Effect |
+|------|------|
+| `keep_first` | Preserve the value list from `variables_1` and ignore the conflicting definition from `variables_2`. |
+| `keep_second` | Overwrite the conflicting definition from `variables_1` with the one from `variables_2`. |
+| `merge_values` | Append the candidate values from `variables_2` after the values from `variables_1`. |
+
+##### Notes
+
+- This node merges variable definitions, not concrete sampled entries. If you already have `MUSTACHE_VARIABLE_LIST` outputs, use `Merge Mustache Variable Lists` instead.
+- `merge_values` follows the same duplicate-key semantics as multi-input `Mustache Variables`: it appends plain value lists in order, but conflicting weighted definitions still raise an error.
 
 ---
 

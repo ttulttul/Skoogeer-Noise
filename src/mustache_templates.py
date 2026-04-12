@@ -33,6 +33,7 @@ _DEFAULT_SINGLE_VARIABLE_VALUE = "fox"
 _DEFAULT_TEMPLATE = "The man has {{haircolor}} hair and {{leglength}} legs."
 _MUSTACHE_VARIABLE_PATTERN = re.compile(r"{{\s*([^{}]+?)\s*}}")
 _SAMPLING_METHODS = ("sequential", "random")
+_MUSTACHE_VARIABLE_CONFLICT_MODES = ("keep_first", "keep_second", "merge_values")
 _REORDER_MODES = ("shuffle", "reverse")
 _MAX_UNBOUNDED_VARIABLE_SETTINGS = 100_000
 _YAML_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -641,6 +642,87 @@ def build_mustache_variable(key, value) -> MustacheVariablesDict:
         len(values),
     )
     return {variable_name: values}
+
+
+def _normalize_mustache_variables_input(variables, *, input_name: str) -> MustacheVariablesDict:
+    if variables is None:
+        return {}
+    if not isinstance(variables, dict):
+        raise ValueError(f"{input_name} must be a MUSTACHE_VARIABLES dictionary, got {type(variables).__name__}.")
+
+    normalized: MustacheVariablesDict = {}
+    for variable_name in _visible_mustache_variable_keys(variables):
+        raw_values = variables.get(variable_name)
+        if not isinstance(raw_values, list):
+            raise ValueError(f"Mustache variable '{variable_name}' values must be stored as a list.")
+        _append_parsed_variable_values(
+            normalized,
+            variable_name=variable_name,
+            values=[str(value) for value in raw_values],
+            weights=_get_variable_weights(variables, variable_name),
+            template_specs=_get_variable_template_specs(variables, variable_name),
+        )
+    return normalized
+
+
+def _remove_mustache_variable_definition(variables: MustacheVariablesDict, variable_name: str) -> None:
+    variables.pop(variable_name, None)
+    _set_variable_weights(variables, variable_name, None)
+    _set_variable_template_specs(variables, variable_name, None)
+
+
+def _copy_mustache_variable_definition(
+    target: MustacheVariablesDict,
+    source: MustacheVariablesDict,
+    variable_name: str,
+) -> None:
+    raw_values = source.get(variable_name)
+    if not isinstance(raw_values, list):
+        raise ValueError(f"Mustache variable '{variable_name}' values must be stored as a list.")
+    _append_parsed_variable_values(
+        target,
+        variable_name=variable_name,
+        values=[str(value) for value in raw_values],
+        weights=_get_variable_weights(source, variable_name),
+        template_specs=_get_variable_template_specs(source, variable_name),
+    )
+
+
+def merge_mustache_variables_dicts(
+    variables_1,
+    variables_2,
+    conflict_mode: str,
+) -> MustacheVariablesDict:
+    left = _normalize_mustache_variables_input(variables_1, input_name="First MUSTACHE_VARIABLES input")
+    right = _normalize_mustache_variables_input(variables_2, input_name="Second MUSTACHE_VARIABLES input")
+    normalized_mode = str(conflict_mode)
+    if normalized_mode not in _MUSTACHE_VARIABLE_CONFLICT_MODES:
+        raise ValueError(
+            "Mustache variable merge conflict_mode must be one of "
+            f"{', '.join(_MUSTACHE_VARIABLE_CONFLICT_MODES)}, got {normalized_mode!r}."
+        )
+
+    merged = _normalize_mustache_variables_input(left, input_name="Merged MUSTACHE_VARIABLES input")
+    for variable_name in _visible_mustache_variable_keys(right):
+        if variable_name not in merged:
+            _copy_mustache_variable_definition(merged, right, variable_name)
+            continue
+
+        if normalized_mode == "keep_first":
+            continue
+        if normalized_mode == "keep_second":
+            _remove_mustache_variable_definition(merged, variable_name)
+            _copy_mustache_variable_definition(merged, right, variable_name)
+            continue
+
+        _copy_mustache_variable_definition(merged, right, variable_name)
+
+    logger.debug(
+        "Merged MUSTACHE_VARIABLES inputs with conflict_mode=%s into %d variable groups.",
+        normalized_mode,
+        len(_visible_mustache_variable_keys(merged)),
+    )
+    return merged
 
 
 def _flatten_mustache_variable_list_input(variables, flattened: MustacheVariableList) -> None:
@@ -1565,6 +1647,36 @@ class MustacheVariableSampler:
         return (sampled_variables,)
 
 
+class MergeMustacheVariables:
+    CATEGORY = "text/template"
+    RETURN_TYPES = ("MUSTACHE_VARIABLES",)
+    RETURN_NAMES = ("variables",)
+    FUNCTION = "merge"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "variables_1": ("MUSTACHE_VARIABLES", {
+                    "tooltip": "First mustache variable definition mapping to merge.",
+                }),
+                "variables_2": ("MUSTACHE_VARIABLES", {
+                    "tooltip": "Second mustache variable definition mapping to merge.",
+                }),
+                "conflict_mode": (_MUSTACHE_VARIABLE_CONFLICT_MODES, {
+                    "default": "keep_first",
+                    "tooltip": (
+                        "How to handle duplicate variable names. keep_first preserves the first input, "
+                        "keep_second overwrites with the second input, and merge_values appends the candidate lists."
+                    ),
+                }),
+            },
+        }
+
+    def merge(self, variables_1, variables_2, conflict_mode):
+        return (merge_mustache_variables_dicts(variables_1, variables_2, str(conflict_mode)),)
+
+
 class MustacheTemplate:
     CATEGORY = "text/template"
     RETURN_TYPES = ("STRING",)
@@ -1748,6 +1860,7 @@ class MergeMustacheVariableLists:
 NODE_CLASS_MAPPINGS = {
     "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
+    "MergeMustacheVariables": MergeMustacheVariables,
     "MergeMustacheVariableLists": MergeMustacheVariableLists,
     "MustacheVariable": MustacheVariable,
     "MustacheVariables": MustacheVariables,
@@ -1759,6 +1872,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
+    "MergeMustacheVariables": "Merge Mustache Variables",
     "MergeMustacheVariableLists": "Merge Mustache Variable Lists",
     "MustacheVariable": "Mustache Variable",
     "MustacheVariables": "Mustache Variables",
