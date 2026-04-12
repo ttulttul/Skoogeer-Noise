@@ -282,13 +282,13 @@ weather_state:
   - "humid valley mist"
 
 spatial_context:
-  - "over the city skyline"
-  - "within a deserted alley"
-  - "across the mountain peaks"
-  - "along the lonely coastline"
-  - "inside a 24-hour laundromat"
-  - "under the highway overpass"
-  - "through the canopy of a dark forest"
+  - "over the station entrances"
+  - "along the service platforms"
+  - "under the overpass"
+  - "through the tunnel mouths"
+  - "across the rail yard"
+  - "inside the depot district"
+  - "beyond the flood channels"
   - "at the dead hour between trains"
 
 time_slice:
@@ -312,6 +312,48 @@ time_slice:
   - "the {{temporal_adjective}} pulse of {{urban_pulse}}"
   - "a {{light_quality}} wash of light during {{weather_state}}"
   - "the {{temporal_adjective}} window when {{celestial_event}} hits {{spatial_context}}"
+
+residue_trace:
+  - "rain marks on the tile"
+  - "salt bloom on concrete seams"
+  - "rust dust beneath the grates"
+  - "old oil sheens in the runoff"
+  - "track grime gathered in the corners"
+
+ambient_smell:
+  - "ozone"
+  - "wet metal"
+  - "detergent ghosts"
+  - "stale electricity"
+  - "cold rust"
+
+light_source_detail:
+  - "emergency bulbs"
+  - "failing fluorescents"
+  - "platform spill"
+  - "signal lamps"
+  - "maintenance torches"
+
+camera_motion:
+  - "locked-off restraint"
+  - "a slow creeping push"
+  - "nervous handheld drift"
+  - "measured dolly tension"
+  - "a surveillance-still hover"
+
+social_energy:
+  - "private defiance"
+  - "conspiratorial intimacy"
+  - "fatigued bravado"
+  - "charged stillness"
+  - "ritualized poise"
+
+urban_afterimage:
+  - "the memory of passing crowds"
+  - "the echo of train brakes"
+  - "the hush after a shift change"
+  - "the feeling of a station just emptied"
+  - "the residue of commuter panic"
 
 prop_object:
   - "a crushed cigarette case"
@@ -492,6 +534,41 @@ environment_feature:
   - "{{architecture_condition}} {{architecture_base}} with {{sound_detail}}"
   - "{{architecture_condition}} {{architecture_base}} full of {{atmosphere_particle}} and {{temperature_detail}}"
 
+ambient_time:
+  - "{{time_slice}}"
+  - "{{time_slice}} filtering down from {{spatial_context}}"
+  - "{{time_slice}} lingering like {{urban_afterimage}}"
+
+weather_residue:
+  - "{{weather_state}} leaving behind {{residue_trace}}"
+  - "{{weather_state}} translated into {{ambient_smell}} and {{residue_trace}}"
+  - "{{weather_state}} remembered only through {{residue_trace}}"
+
+infrastructure_light:
+  - "{{light_source_detail}} pushing {{lighting_color:static}} across {{surface_phrase}}"
+  - "{{light_source_detail}} breaking into {{reflection_quality}} on {{surface_phrase}}"
+  - "{{lighting_color:static}} from {{light_source_detail}} catching {{skin_highlight}}"
+
+urban_memory:
+  - "{{urban_pulse}} reduced to {{urban_afterimage}}"
+  - "{{urban_pulse}} echoing as {{sound_detail}} and {{ambient_smell}}"
+  - "{{urban_pulse}} felt only through {{social_energy}}"
+
+body_vector:
+  - "a {{pose_anchor}} line as they {{posture_dynamic}}"
+  - "a {{pose_anchor}} stance while they {{posture_dynamic}}"
+  - "a {{pose_anchor}} stance broken by {{micro_gesture}}"
+
+pressure_pattern:
+  - "{{social_energy}} under {{scene_motif:static}}"
+  - "{{social_energy}} sharpened by {{urban_afterimage}}"
+  - "{{social_energy}} held against {{weather_residue}}"
+
+chromatic_logic:
+  - "{{dominant_color:static,lowercase}} set against {{accent_color:static,lowercase}} under {{lighting_color:static}} light"
+  - "{{lighting_color:static}} steering {{dominant_color:static,lowercase}} and {{accent_color:static,lowercase}} into tension"
+  - "{{accent_color:static,lowercase}} details sharpening the {{dominant_color:static,lowercase}} silhouette in {{lighting_color:static}}"
+
 transit_memory:
   - "{{transit_trace}} along {{surface_phrase}}"
   - "{{transit_trace}} beside {{surface_phrase}} and {{reflection_quality}}"
@@ -508,6 +585,11 @@ frame_composition:
   - "{{shot_frame}} built around {{reflection_quality}}"
   - "{{shot_frame}} with {{surface_phrase}} and {{atmosphere_particle}}"
   - "{{shot_frame}} built from {{grade_profile}} and {{reflection_quality}}"
+
+camera_choreography:
+  - "{{camera_motion}} in a {{camera_angle:static}} setup"
+  - "{{camera_motion}} through {{lens_detail:static}} with {{focus_behavior:static}}"
+  - "{{camera_motion}} shaping a {{shot_frame}} around {{social_energy}}"
 
 prop_detail:
   - "{{prop_object}} dangling from one hand"
@@ -532,6 +614,23 @@ texture_clause:
   - "{{surface_phrase:static,propercase}} show {{reflection_quality:static}}."
   - "{{skin_highlight:static,propercase}} cuts through {{lighting_style:static}}."
   - "{{set_dressing_line:static,propercase}}."
+
+ambient_clause:
+  - "{{ambient_time:propercase}} hangs over the scene."
+  - "{{weather_residue:propercase}}."
+  - "{{urban_memory:propercase}}."
+
+infrastructure_clause:
+  - "{{infrastructure_light:propercase}}."
+  - "{{infrastructure_light:propercase}}, with {{residue_trace}} still visible on the surfaces."
+
+chroma_clause:
+  - "{{chromatic_logic:propercase}}."
+  - "The palette obeys {{chromatic_logic}}."
+
+body_clause:
+  - "Their bodies resolve into {{body_vector}}."
+  - "The figure work reads as {{body_vector}}."
 
 asymmetry_clause:
   - "Composition favors asymmetry, with {{left_detail_focus:static}} and {{right_detail_focus:static}}."
@@ -597,6 +696,12 @@ camera_clause:
   - "Camera behavior stays {{camera_behavior}}."
   - "The shot reads as {{camera_behavior}}, tuned to {{lighting_style}}."
   - "Camera behavior stays {{camera_behavior}}, chasing {{skin_highlight}}."
+  - "Camera behavior favors {{camera_choreography}}."
+
+narrative_clause:
+  - "The emotional pressure is {{pressure_pattern}}."
+  - "The frame carries {{social_energy}} and the sense of {{urban_afterimage}}."
+  - "Everything points toward {{scene_motif:static}} shaped by {{social_energy}}."
 
 micro_line:
   - "{{micro_gesture:propercase}}."
@@ -610,9 +715,10 @@ closing_clause:
 
 scene_cut:
   - "{{subject_clause}} {{blocking_clause}} {{environment_clause}} {{detail_clause}} {{style_line}} {{asymmetry_clause}} {{closing_clause}}"
-  - "{{subject_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{camera_clause}} {{closing_clause}}"
-  - "{{subject_clause}} {{style_line}} {{environment_clause}} {{blocking_clause}} {{detail_clause}} {{texture_clause}} {{closing_clause}}"
-  - "{{subject_clause}} {{camera_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{asymmetry_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{ambient_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{camera_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{style_line}} {{environment_clause}} {{blocking_clause}} {{body_clause}} {{detail_clause}} {{texture_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{camera_clause}} {{ambient_clause}} {{environment_clause}} {{blocking_clause}} {{style_line}} {{asymmetry_clause}} {{closing_clause}}"
+  - "{{subject_clause}} {{infrastructure_clause}} {{environment_clause}} {{blocking_clause}} {{body_clause}} {{chroma_clause}} {{narrative_clause}} {{closing_clause}}"
 
 # Level 1 - final engine
 prompt_path:
