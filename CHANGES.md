@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.27 - 2026-04-15
+- Added `scale_cfg` to `KSampler (LoRA Sigma Inverse)` so CFG can be reduced dynamically toward `1.0` as scheduled LoRA strength increases.
+- Added regression coverage for dynamic CFG scaling in both the hook fallback path and the bypass injection path.
+
 ## 1.2.26 - 2026-04-01
 - TurboQuant runtime stats now reset automatically at the start of each new sampling run via a sampler pre-CFG hook, so fallback summaries no longer accumulate stale counts across runs.
 - Added regression coverage for the per-run stats reset behavior.

@@ -1446,11 +1446,13 @@ You can also gate LoRA application by step index:
 | `min_lora_step` | `INT` | `-1` | `-1..10000` | First enabled step index; `-1` = no lower bound. |
 | `max_lora_step` | `INT` | `-1` | `-1..10000` | Last enabled step index; `-1` = no upper bound. |
 | `denoise` | `FLOAT` | `1.0` | `0.0..1.0` | Denoise fraction (same as KSampler). |
+| `scale_cfg` | `BOOLEAN` | `false` | `true`/`false` | If enabled, active CFG becomes `cfg - (cfg - 1.0) * lora_strength` on LoRA-active steps. |
 
 ##### Notes
 
 - This node now prefers ComfyUI's **bypass LoRA injection path** for adapter-based LoRAs, so LoRA weights are injected once and strength is updated at runtime via per-call multipliers (no per-step repatching).
 - The bypass path now also synchronizes adapter tensors to the active UNet input device at runtime, preventing intermittent CPU/GPU mismatch errors on offload-heavy runs.
+- `scale_cfg` is useful for distilled-model LoRAs that become unstable at higher CFG values; it automatically pulls CFG toward `1.0` as scheduled LoRA strength increases.
 - If the LoRA contains non-bypass-compatible patch types, the node falls back to hook keyframe scheduling for correctness.
 - LoRA scheduling here is model-only because `KSampler`-style nodes do not receive a CLIP input.
 
