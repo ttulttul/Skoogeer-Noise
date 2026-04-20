@@ -39,6 +39,32 @@ def next_seed_values(seed: int, *, count: int = 4) -> tuple[int, ...]:
     return derived
 
 
+def next_seed_output_lists(
+    seed: int,
+    *,
+    output_count: int = 4,
+    count_per_output: int = 1,
+) -> tuple[tuple[int, ...], ...]:
+    if output_count <= 0:
+        raise ValueError(f"output_count must be positive, got {output_count}.")
+    if count_per_output <= 0:
+        raise ValueError(f"count_per_output must be positive, got {count_per_output}.")
+
+    flat_values = next_seed_values(seed, count=output_count * count_per_output)
+    grouped = tuple(
+        flat_values[output_index::output_count]
+        for output_index in range(output_count)
+    )
+    logger.debug(
+        "Grouped %d derived seeds into %d outputs with count_per_output=%d: %s",
+        len(flat_values),
+        output_count,
+        count_per_output,
+        grouped,
+    )
+    return grouped
+
+
 def _seeded_gaussian_noise_like(tensor: torch.Tensor, *, seed: int) -> torch.Tensor:
     if not isinstance(tensor, torch.Tensor):
         raise TypeError(f"Expected torch.Tensor, got {type(tensor)}")
@@ -258,6 +284,7 @@ class NextSeeds:
     CATEGORY = "utils/seed"
     RETURN_TYPES = ("INT", "INT", "INT", "INT")
     RETURN_NAMES = ("seed_1", "seed_2", "seed_3", "seed_4")
+    OUTPUT_IS_LIST = (True, True, True, True)
     FUNCTION = "next_seeds"
 
     @classmethod
@@ -268,15 +295,30 @@ class NextSeeds:
                     "default": 0,
                     "min": 0,
                     "max": _SEED_MASK_64,
-                    "tooltip": "Base 64-bit seed. The node treats it as an unsigned 64-bit value and derives four deterministic child seeds for downstream nodes.",
+                    "tooltip": "Base 64-bit seed. The node treats it as an unsigned 64-bit value and derives four deterministic child seed streams for downstream nodes.",
+                }),
+                "count": ("INT", {
+                    "default": 1,
+                    "min": 1,
+                    "max": 4096,
+                    "tooltip": (
+                        "How many seeds to emit per output. A count of 1 preserves the original four-way seed "
+                        "fan-out; higher counts extend each output's deterministic seed stream."
+                    ),
                 }),
             },
         }
 
-    def next_seeds(self, seed: int):
-        derived = next_seed_values(seed, count=4)
-        logger.debug("NextSeeds node expanded seed=%d into %s", int(seed) & _SEED_MASK_64, derived)
-        return derived
+    def next_seeds(self, seed: int, count: int):
+        count_value = int(count)
+        derived = next_seed_output_lists(seed, output_count=4, count_per_output=count_value)
+        logger.debug(
+            "NextSeeds node expanded seed=%d into 4 outputs with count=%d: %s",
+            int(seed) & _SEED_MASK_64,
+            count_value,
+            derived,
+        )
+        return tuple(list(values) for values in derived)
 
 
 NODE_CLASS_MAPPINGS = {

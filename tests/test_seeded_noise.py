@@ -7,7 +7,14 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.seeded_noise import ImageNoise, LatentNoise, NextSeeds, generate_seed, next_seed_values  # noqa: E402
+from src.seeded_noise import (  # noqa: E402
+    ImageNoise,
+    LatentNoise,
+    NextSeeds,
+    generate_seed,
+    next_seed_output_lists,
+    next_seed_values,
+)
 
 
 def test_latent_noise_deterministic_for_seed():
@@ -113,21 +120,73 @@ def test_next_seed_values_expand_zero_seed_into_distinct_nonzero_values():
     assert all(seed != 0 for seed in seeds)
 
 
-def test_next_seeds_node_returns_expected_seed_fanout():
-    node = NextSeeds()
-
-    outputs = node.next_seeds(123456789)
-
-    assert outputs == (
-        0x781E82BBFF6E8F64,
-        0x780CE7A5D373EB6F,
-        0x83E08B7E6BEBC732,
-        0x026450D10CF97BDE,
-    )
-
-
 def test_next_seed_values_wrap_input_at_64_bits():
     wrapped = next_seed_values(0xFFFFFFFFFFFFFFFF, count=4)
     masked = next_seed_values(-1, count=4)
 
     assert wrapped == masked
+
+
+def test_next_seed_output_lists_preserve_original_fanout_at_count_one():
+    grouped = next_seed_output_lists(123456789, count_per_output=1)
+
+    assert grouped == (
+        (0x781E82BBFF6E8F64,),
+        (0x780CE7A5D373EB6F,),
+        (0x83E08B7E6BEBC732,),
+        (0x026450D10CF97BDE,),
+    )
+
+
+def test_next_seed_output_lists_extend_each_output_stream():
+    grouped = next_seed_output_lists(123456789, count_per_output=3)
+
+    assert grouped == (
+        (
+            0x781E82BBFF6E8F64,
+            0xDFF0B61891E95BE4,
+            0x42B9B6A561E48821,
+        ),
+        (
+            0x780CE7A5D373EB6F,
+            0xA735D784BAFF3551,
+            0x6782D1C819E6708A,
+        ),
+        (
+            0x83E08B7E6BEBC732,
+            0x36D7E9014DB7EFA0,
+            0x5FB45D7F824D87BD,
+        ),
+        (
+            0x026450D10CF97BDE,
+            0xE105735CD01953A0,
+            0x0F65D13E1C77D0AF,
+        ),
+    )
+
+
+def test_next_seeds_node_returns_expected_seed_fanout():
+    node = NextSeeds()
+
+    outputs = node.next_seeds(123456789, count=1)
+
+    assert outputs == (
+        [0x781E82BBFF6E8F64],
+        [0x780CE7A5D373EB6F],
+        [0x83E08B7E6BEBC732],
+        [0x026450D10CF97BDE],
+    )
+    assert node.OUTPUT_IS_LIST == (True, True, True, True)
+
+
+def test_next_seeds_node_returns_list_outputs_when_count_is_greater_than_one():
+    node = NextSeeds()
+
+    outputs = node.next_seeds(123456789, count=3)
+
+    assert outputs == (
+        [0x781E82BBFF6E8F64, 0xDFF0B61891E95BE4, 0x42B9B6A561E48821],
+        [0x780CE7A5D373EB6F, 0xA735D784BAFF3551, 0x6782D1C819E6708A],
+        [0x83E08B7E6BEBC732, 0x36D7E9014DB7EFA0, 0x5FB45D7F824D87BD],
+        [0x026450D10CF97BDE, 0xE105735CD01953A0, 0x0F65D13E1C77D0AF],
+    )

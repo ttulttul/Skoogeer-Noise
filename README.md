@@ -348,7 +348,7 @@ Adds **seeded Gaussian noise** to a ComfyUI `IMAGE` tensor.
 
 #### Next Seeds
 
-Expands one 64-bit seed into four deterministic 64-bit seed outputs using a MurmurHash-style 64-bit mixer over four offset streams.
+Expands one 64-bit seed into four deterministic 64-bit seed outputs using a MurmurHash-style 64-bit mixer over offset streams. Each output can emit one seed or a list of seeds from its own deterministic stream.
 
 - **Menu category:** `utils/seed`
 - **Returns:** `INT`, `INT`, `INT`, `INT`
@@ -358,19 +358,20 @@ Expands one 64-bit seed into four deterministic 64-bit seed outputs using a Murm
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `seed` | `INT` | `0` | `0..2^64-1` | Base ComfyUI seed. The node first treats it as an unsigned 64-bit integer, then derives four independent-looking child seeds from it. Use this when you want one master seed to drive four downstream nodes without manually picking related seed values. |
+| `count` | `INT` | `1` | `1..4096` | Number of seeds to emit per output. `1` preserves the original four-way fan-out. Larger values emit list-valued INT batches on each output. |
 
 ##### Outputs
 
 | Output | Type | Description |
 |------|------|-------------|
-| `seed_1` | `INT` | First derived 64-bit seed. |
-| `seed_2` | `INT` | Second derived 64-bit seed. |
-| `seed_3` | `INT` | Third derived 64-bit seed. |
-| `seed_4` | `INT` | Fourth derived 64-bit seed. |
+| `seed_1` | `INT` | First derived 64-bit seed stream. Emits one seed when `count = 1`, otherwise a list of `count` seeds. |
+| `seed_2` | `INT` | Second derived 64-bit seed stream. Emits one seed when `count = 1`, otherwise a list of `count` seeds. |
+| `seed_3` | `INT` | Third derived 64-bit seed stream. Emits one seed when `count = 1`, otherwise a list of `count` seeds. |
+| `seed_4` | `INT` | Fourth derived 64-bit seed stream. Emits one seed when `count = 1`, otherwise a list of `count` seeds. |
 
 ##### How it works internally
 
-Starting from the input `seed`, the node creates four 64-bit stream values by adding a large fixed increment each time (`0x9E3779B97F4A7C15`, a golden-ratio-derived step commonly used for sequence spacing in hash/PRNG code). Each stream value is then passed through the 64-bit mixer:
+Starting from the input `seed`, the node creates 64-bit stream values by adding a large fixed increment each time (`0x9E3779B97F4A7C15`, a golden-ratio-derived step commonly used for sequence spacing in hash/PRNG code). Each stream value is then passed through the 64-bit mixer:
 
 ```python
 x = (x ^ (x >> 33)) & 0xFFFFFFFFFFFFFFFF
@@ -383,11 +384,12 @@ x = (x ^ (x >> 33)) & 0xFFFFFFFFFFFFFFFF
 This is the MurmurHash3 64-bit finalizer, used here as a strong bit-mixing function rather than as a full hash. Two practical details matter:
 
 - The arithmetic is masked back to `0..2^64-1` after each step, so the outputs stay valid ComfyUI 64-bit seeds.
-- The node mixes four offset stream values instead of repeatedly mixing the raw input directly. That avoids the `seed = 0` fixed-point case (`0` would otherwise mix back to `0`) and gives four distinct outputs even from simple nearby inputs.
+- The node mixes offset stream values instead of repeatedly mixing the raw input directly. That avoids the `seed = 0` fixed-point case (`0` would otherwise mix back to `0`) and gives distinct outputs even from simple nearby inputs.
+- When `count > 1`, the node generates `4 * count` mixed values and de-interleaves them back into four per-output streams. That keeps each output's first emitted seed identical to the old scalar behavior while extending the same stream deterministically for the remaining list entries.
 
 ##### Notes
 
-- The mapping is fully deterministic: the same input `seed` always produces the same four outputs.
+- The mapping is fully deterministic: the same input `seed` and `count` always produce the same output lists.
 - The outputs are intended for seed fan-out, not cryptography.
 - Negative values are not accepted by the node UI; if one is supplied programmatically, it is wrapped to unsigned 64-bit before mixing.
 
