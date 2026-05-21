@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.28 - 2026-05-21
+- Added `clamp_cfg_after` to `KSampler (LoRA Sigma Inverse)` so scaled CFG can snap to `1.0` after a selected sampling step instead of relying only on the linear LoRA-strength curve.
+- Added regression coverage for the CFG clamp boundary behavior.
+
 ## 1.2.27 - 2026-04-15
 - Added `scale_cfg` to `KSampler (LoRA Sigma Inverse)` so CFG can be reduced dynamically toward `1.0` as scheduled LoRA strength increases.
 - Added regression coverage for dynamic CFG scaling in both the hook fallback path and the bypass injection path.

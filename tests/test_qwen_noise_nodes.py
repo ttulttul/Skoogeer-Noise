@@ -811,6 +811,27 @@ def test_ksampler_lora_sigma_inverse_builds_percent_schedule():
     assert strengths == pytest.approx([0.0, 0.5, 1.0], abs=1e-6)
 
 
+def test_ksampler_lora_sigma_inverse_clamps_cfg_after_step():
+    assert qnn.KSamplerLoraSigmaInverse._active_cfg_for_strength(
+        cfg=8.0,
+        lora_strength=0.5,
+        step_index=1,
+        clamp_cfg_after=-1,
+    ) == pytest.approx(4.5, abs=1e-6)
+    assert qnn.KSamplerLoraSigmaInverse._active_cfg_for_strength(
+        cfg=8.0,
+        lora_strength=0.5,
+        step_index=1,
+        clamp_cfg_after=1,
+    ) == pytest.approx(4.5, abs=1e-6)
+    assert qnn.KSamplerLoraSigmaInverse._active_cfg_for_strength(
+        cfg=8.0,
+        lora_strength=0.5,
+        step_index=2,
+        clamp_cfg_after=1,
+    ) == pytest.approx(1.0, abs=1e-6)
+
+
 def test_ksampler_lora_sigma_inverse_syncs_adapter_device_once(monkeypatch):
     node = qnn.KSamplerLoraSigmaInverse()
     adapters = [object(), object()]

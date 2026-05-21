@@ -2804,6 +2804,12 @@ class KSamplerLoraSigmaInverse:
                     "default": False,
                     "tooltip": "Scale CFG toward 1.0 as LoRA strength increases during active LoRA steps.",
                 }),
+                "clamp_cfg_after": ("INT", {
+                    "default": -1,
+                    "min": -1,
+                    "max": 10000,
+                    "tooltip": "Sets the CFG value to 1.0 after the given sampling step.",
+                }),
             }
         }
 
@@ -3038,7 +3044,15 @@ class KSamplerLoraSigmaInverse:
         return float(min_lora_strength) + strength_range * (1.0 - normalized)
 
     @staticmethod
-    def _active_cfg_for_strength(cfg: float, lora_strength: float) -> float:
+    def _active_cfg_for_strength(
+        cfg: float,
+        lora_strength: float,
+        step_index: int = 0,
+        clamp_cfg_after: int = -1,
+    ) -> float:
+        if int(clamp_cfg_after) >= 0 and int(step_index) > int(clamp_cfg_after):
+            return 1.0
+
         cfg_value = float(cfg)
         strength_value = float(lora_strength)
         return cfg_value - (cfg_value - 1.0) * strength_value
@@ -3225,6 +3239,7 @@ class KSamplerLoraSigmaInverse:
         reference_sigmas: torch.Tensor,
         min_lora_step: int,
         max_lora_step: int,
+        clamp_cfg_after: int,
     ) -> None:
         previous_sampler_cfg = model_with_lora.model_options.get("sampler_cfg_function")
         state = {"last_step_index": None, "last_strength": None, "last_active_cfg": None}
@@ -3241,7 +3256,12 @@ class KSamplerLoraSigmaInverse:
                 min_lora_step=min_lora_step,
                 max_lora_step=max_lora_step,
             )
-            active_cfg = self._active_cfg_for_strength(base_cfg, strength)
+            active_cfg = self._active_cfg_for_strength(
+                base_cfg,
+                strength,
+                step_index=step_index,
+                clamp_cfg_after=clamp_cfg_after,
+            )
             last_step_index = state["last_step_index"]
             last_strength = state["last_strength"]
             last_active_cfg = state["last_active_cfg"]
@@ -3402,6 +3422,7 @@ class KSamplerLoraSigmaInverse:
         max_lora_step,
         denoise=1.0,
         scale_cfg=False,
+        clamp_cfg_after=-1,
     ):
         if comfy_samplers is None:
             raise RuntimeError("comfy.samplers is unavailable. This node only works inside ComfyUI.")
@@ -3477,6 +3498,7 @@ class KSamplerLoraSigmaInverse:
                     reference_sigmas=sigmas_tensor,
                     min_lora_step=min_lora_step,
                     max_lora_step=max_lora_step,
+                    clamp_cfg_after=clamp_cfg_after,
                 )
             logger.info(
                 "KSamplerLoraSigmaInverse: using bypass LoRA path (adapters=%d missing=%d min=%.4f max=%.4f min_step=%d max_step=%d scale_cfg=%s lora=%s).",
@@ -3526,6 +3548,7 @@ class KSamplerLoraSigmaInverse:
                 reference_sigmas=sigmas_tensor,
                 min_lora_step=min_lora_step,
                 max_lora_step=max_lora_step,
+                clamp_cfg_after=clamp_cfg_after,
             )
 
         hooks, schedule = self._build_scheduled_model_hook(
