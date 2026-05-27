@@ -1,5 +1,6 @@
 # Learnings
 
+- ComfyUI `MODEL` values can be emitted as list outputs with `OUTPUT_IS_LIST = (True,)`; native `KSampler` is not list-aware, so the executor maps it once per model while repeating singleton inputs like seed, steps, conditioning, and latent.
 - Flux.2 latents are 2x2 patchified (128 channels); unpatchify and patchify helpers/nodes let us work at 32 channels with doubled spatial resolution.
 - Channel-space transforms can be applied in latent space using linear/nonlinear ops with optional channel selection heuristics and per-channel stat matching.
 - Latent Channel Merge blends selected channels from a source latent into a destination latent with the same selection modes as other channel ops.

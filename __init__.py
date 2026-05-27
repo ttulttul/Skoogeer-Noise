@@ -62,6 +62,10 @@ if __package__:
         NODE_CLASS_MAPPINGS as TURBOQUANT_NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS as TURBOQUANT_DISPLAY_NAME_MAPPINGS,
     )
+    from .src.model_list import (  # type: ignore[attr-defined] # noqa: F401
+        NODE_CLASS_MAPPINGS as MODEL_LIST_NODE_CLASS_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS as MODEL_LIST_DISPLAY_NAME_MAPPINGS,
+    )
 else:  # pragma: no cover - direct execution fallback
     _ROOT_DIR = pathlib.Path(__file__).resolve().parent
     _load_module_from_path("masking", _ROOT_DIR / "src" / "masking.py")
@@ -82,6 +86,7 @@ else:  # pragma: no cover - direct execution fallback
     qwen_noise_module = _load_module_from_path("qwen_noise_nodes", _ROOT_DIR / "src" / "qwen_noise_nodes.py")
     rotorquant_module = _load_module_from_path("rotorquant_attention", _ROOT_DIR / "src" / "rotorquant_attention.py")
     turboquant_module = _load_module_from_path("turboquant_attention", _ROOT_DIR / "src" / "turboquant_attention.py")
+    model_list_module = _load_module_from_path("model_list", _ROOT_DIR / "src" / "model_list.py")
 
     STATS_NODE_CLASS_MAPPINGS = getattr(stats_module, "NODE_CLASS_MAPPINGS")
     STATS_DISPLAY_NAME_MAPPINGS = getattr(stats_module, "NODE_DISPLAY_NAME_MAPPINGS")
@@ -105,6 +110,8 @@ else:  # pragma: no cover - direct execution fallback
     ROTORQUANT_DISPLAY_NAME_MAPPINGS = getattr(rotorquant_module, "NODE_DISPLAY_NAME_MAPPINGS")
     TURBOQUANT_NODE_CLASS_MAPPINGS = getattr(turboquant_module, "NODE_CLASS_MAPPINGS")
     TURBOQUANT_DISPLAY_NAME_MAPPINGS = getattr(turboquant_module, "NODE_DISPLAY_NAME_MAPPINGS")
+    MODEL_LIST_NODE_CLASS_MAPPINGS = getattr(model_list_module, "NODE_CLASS_MAPPINGS")
+    MODEL_LIST_DISPLAY_NAME_MAPPINGS = getattr(model_list_module, "NODE_DISPLAY_NAME_MAPPINGS")
 
 NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     **DRAG_NODE_CLASS_MAPPINGS,
@@ -117,6 +124,7 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     **QWEN_NOISE_NODE_CLASS_MAPPINGS,
     **ROTORQUANT_NODE_CLASS_MAPPINGS,
     **TURBOQUANT_NODE_CLASS_MAPPINGS,
+    **MODEL_LIST_NODE_CLASS_MAPPINGS,
     **STATS_NODE_CLASS_MAPPINGS,
 }
 NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
@@ -130,6 +138,7 @@ NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     **QWEN_NOISE_DISPLAY_NAME_MAPPINGS,
     **ROTORQUANT_DISPLAY_NAME_MAPPINGS,
     **TURBOQUANT_DISPLAY_NAME_MAPPINGS,
+    **MODEL_LIST_DISPLAY_NAME_MAPPINGS,
     **STATS_DISPLAY_NAME_MAPPINGS,
 }
 

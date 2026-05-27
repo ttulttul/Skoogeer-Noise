@@ -185,6 +185,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [KSampler (LoRA Sigma Inverse)](#ksampler-lora-sigma-inverse) | `sampling` | `LATENT` |
 | [Unpatchify Flux.2 Latent](#unpatchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Patchify Flux.2 Latent](#patchify-flux2-latent) | `Latent/Flux` | `LATENT` |
+| [Models List](#models-list) | `model/batch` | `MODEL` list |
 | [Model (RotorQuant Attention)](#model-rotorquant-attention) | `model/patch` | `MODEL` |
 | [Model (TurboQuant Attention)](#model-turboquant-attention) | `model/patch` | `MODEL` |
 | [Conditioning (Add Noise)](#conditioning-add-noise) | `conditioning/noise` | `CONDITIONING` |
@@ -1503,6 +1504,29 @@ Re-patchifies an unpatchified Flux.2 latent back to the standard 2x2 patch forma
 ---
 
 ### Model Patches
+
+#### Models List
+
+Combines multiple `MODEL` patcher objects into a list-valued `MODEL` output.
+This mirrors the workflow role of ComfyUI's native `Batch Latents` and `Batch Masks`, but it does not merge model internals; it emits a list so standard ComfyUI list mapping can run downstream nodes once per model.
+
+- **Menu category:** `model/batch`
+- **Returns:** `MODEL` list
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `model_1` | `MODEL` | – | – | First model patcher object to emit. |
+| `model_2` | `MODEL` | – | – | Second model patcher object to emit. |
+| `model_3` .. `model_50` | `MODEL` | – | optional | Additional model patcher objects appended in socket order. |
+
+##### Notes
+
+- Feed the output into a normal `MODEL` input such as native `KSampler.model` to sample once per model while singleton inputs like seed, steps, conditioning, and latent are repeated.
+- ComfyUI's executor maps list outputs into non-list-aware downstream nodes, and native `KSampler` does not declare `INPUT_IS_LIST`, so each model object is passed to one sampler invocation.
+
+---
 
 #### Model (RotorQuant Attention)
 

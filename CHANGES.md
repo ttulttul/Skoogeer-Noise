@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.50 - 2026-05-27
+- Added `Models List`, a list-valued `MODEL` utility node for fan-out workflows that feed multiple model patcher objects into downstream nodes such as native `KSampler`.
+- Added regression coverage for the node contract and ComfyUI's current list-mapping behavior for `KSampler.model`.
+
 ## 1.2.28 - 2026-05-21
 - Added `clamp_cfg_after` to `KSampler (LoRA Sigma Inverse)` so scaled CFG can snap to `1.0` after a selected sampling step instead of relying only on the linear LoRA-strength curve.
 - Added regression coverage for the CFG clamp boundary behavior.
