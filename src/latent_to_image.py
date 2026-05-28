@@ -121,6 +121,45 @@ def _extract_grayscale(images: torch.Tensor, channel_source: str) -> torch.Tenso
     raise ValueError(f"Unknown channel_source '{channel_source}', expected r/g/b/mean.")
 
 
+def _insert_tensor_batch(batch: torch.Tensor, item: torch.Tensor, index: int, *, input_name: str) -> torch.Tensor:
+    index_value = int(index)
+    batch_count = int(batch.shape[0])
+    item_count = int(item.shape[0])
+    if item_count == 0:
+        raise ValueError(f"{input_name} to insert must have a non-empty batch dimension.")
+    if index_value < 0 or index_value > batch_count:
+        raise ValueError(f"index must be in the inclusive range [0, {batch_count}], got {index_value}.")
+    if tuple(batch.shape[1:]) != tuple(item.shape[1:]):
+        raise ValueError(
+            f"{input_name} shape after the batch dimension must match the target batch: "
+            f"got {tuple(item.shape[1:])}, expected {tuple(batch.shape[1:])}."
+        )
+    if batch.dtype != item.dtype:
+        raise TypeError(f"{input_name} dtype must match the target batch: got {item.dtype}, expected {batch.dtype}.")
+    if batch.device != item.device:
+        raise ValueError(f"{input_name} device must match the target batch: got {item.device}, expected {batch.device}.")
+
+    before = batch[:index_value]
+    after = batch[index_value:]
+    return torch.cat((before, item, after), dim=0)
+
+
+def _normalize_latent_mask(mask: torch.Tensor, sample_count: int, *, input_name: str) -> torch.Tensor:
+    if not isinstance(mask, torch.Tensor):
+        raise TypeError(f"{input_name} noise_mask must be a torch.Tensor, got {type(mask)}.")
+    if mask.ndim < 3:
+        raise ValueError(f"{input_name} noise_mask must have at least 3 dimensions, got {tuple(mask.shape)}.")
+    mask_count = int(mask.shape[0])
+    if mask_count == sample_count:
+        return mask
+    if mask_count == 1:
+        return mask.repeat((sample_count,) + ((1,) * (mask.ndim - 1)))
+    raise ValueError(
+        f"{input_name} noise_mask batch dimension must be 1 or match samples batch size {sample_count}, "
+        f"got {mask_count}."
+    )
+
+
 class LatentToImage:
     CATEGORY = "latent/debug"
     FUNCTION = "render"
@@ -251,12 +290,115 @@ class ImageBatchToLatent:
         return ({"samples": samples},)
 
 
+class ImageToBatch:
+    CATEGORY = "image/batch"
+    FUNCTION = "insert"
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image_batch": ("IMAGE", {"tooltip": "Existing image batch to insert into."}),
+                "image": ("IMAGE", {"tooltip": "Image or image batch to insert at the requested index."}),
+                "index": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 4096,
+                    "tooltip": "Batch index where the image is inserted. Existing items at and after this index shift right.",
+                }),
+            }
+        }
+
+    def insert(self, image_batch, image, index=0):
+        batch = _validate_image_batch(image_batch)
+        item = _validate_image_batch(image)
+        output = _insert_tensor_batch(batch, item, index, input_name="IMAGE")
+        logger.debug(
+            "ImageToBatch inserted %d image(s) into batch_size=%d at index=%d; output_shape=%s",
+            int(item.shape[0]),
+            int(batch.shape[0]),
+            int(index),
+            tuple(output.shape),
+        )
+        return (output,)
+
+
+class LatentToBatch:
+    CATEGORY = "latent/batch"
+    FUNCTION = "insert"
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent_batch": ("LATENT", {"tooltip": "Existing latent batch to insert into."}),
+                "latent": ("LATENT", {"tooltip": "Latent or latent batch to insert at the requested index."}),
+                "index": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 4096,
+                    "tooltip": "Batch index where the latent is inserted. Existing items at and after this index shift right.",
+                }),
+            }
+        }
+
+    def insert(self, latent_batch, latent, index=0):
+        batch_latent = _validate_latent(latent_batch)
+        item_latent = _validate_latent(latent)
+        batch_samples: torch.Tensor = batch_latent["samples"]
+        item_samples: torch.Tensor = item_latent["samples"]
+
+        output = dict(batch_latent)
+        output["samples"] = _insert_tensor_batch(batch_samples, item_samples, index, input_name="LATENT")
+
+        if "noise_mask" in batch_latent or "noise_mask" in item_latent:
+            if "noise_mask" not in batch_latent or "noise_mask" not in item_latent:
+                raise ValueError("Both latent_batch and latent must include noise_mask when either input includes it.")
+            batch_mask = _normalize_latent_mask(
+                batch_latent["noise_mask"],
+                int(batch_samples.shape[0]),
+                input_name="latent_batch",
+            )
+            item_mask = _normalize_latent_mask(
+                item_latent["noise_mask"],
+                int(item_samples.shape[0]),
+                input_name="latent",
+            )
+            output["noise_mask"] = _insert_tensor_batch(batch_mask, item_mask, index, input_name="LATENT noise_mask")
+
+        if "batch_index" in batch_latent:
+            existing_indices = list(batch_latent["batch_index"])
+            inserted_indices = list(item_latent.get("batch_index", range(int(item_samples.shape[0]))))
+            output["batch_index"] = (
+                existing_indices[: int(index)]
+                + inserted_indices
+                + existing_indices[int(index):]
+            )
+
+        logger.debug(
+            "LatentToBatch inserted %d latent sample(s) into batch_size=%d at index=%d; output_shape=%s",
+            int(item_samples.shape[0]),
+            int(batch_samples.shape[0]),
+            int(index),
+            tuple(output["samples"].shape),
+        )
+        return (output,)
+
+
 NODE_CLASS_MAPPINGS = {
     "LatentToImage": LatentToImage,
     "ImageBatchToLatent": ImageBatchToLatent,
+    "ImageToBatch": ImageToBatch,
+    "LatentToBatch": LatentToBatch,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LatentToImage": "Latent to Image Batch",
     "ImageBatchToLatent": "Image Batch to Latent",
+    "ImageToBatch": "ImageToBatch",
+    "LatentToBatch": "LatentToBatch",
 }

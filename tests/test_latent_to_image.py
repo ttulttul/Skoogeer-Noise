@@ -1,13 +1,14 @@
 import pathlib
 import sys
 
+import pytest
 import torch
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.latent_to_image import ImageBatchToLatent, LatentToImage  # noqa: E402
+from src.latent_to_image import ImageBatchToLatent, ImageToBatch, LatentToBatch, LatentToImage  # noqa: E402
 
 
 def test_latent_to_image_outputs_channel_batch_bhwc():
@@ -91,3 +92,95 @@ def test_image_batch_to_latent_channel_source_mean():
     expected = torch.tensor([[[[2.0]], [[5.0]]]], dtype=torch.float32)
     assert merged["samples"].shape == (1, 2, 1, 1)
     assert torch.allclose(merged["samples"], expected, atol=1e-6)
+
+
+def test_image_to_batch_inserts_image_at_middle_index():
+    batch = torch.tensor(
+        [
+            [[[1.0, 1.0, 1.0]]],
+            [[[3.0, 3.0, 3.0]]],
+        ],
+        dtype=torch.float32,
+    )
+    image = torch.tensor([[[[2.0, 2.0, 2.0]]]], dtype=torch.float32)
+
+    node = ImageToBatch()
+    (output,) = node.insert(image_batch=batch, image=image, index=1)
+
+    assert output.shape == (3, 1, 1, 3)
+    assert torch.equal(output[:, 0, 0, 0], torch.tensor([1.0, 2.0, 3.0]))
+
+
+def test_image_to_batch_can_prepend_append_and_insert_image_batches():
+    batch = torch.arange(2 * 1 * 1 * 3, dtype=torch.float32).reshape(2, 1, 1, 3)
+    images = torch.full((2, 1, 1, 3), 99.0, dtype=torch.float32)
+
+    node = ImageToBatch()
+    (prepended,) = node.insert(image_batch=batch, image=images[:1], index=0)
+    (appended,) = node.insert(image_batch=batch, image=images[:1], index=2)
+    (multi_inserted,) = node.insert(image_batch=batch, image=images, index=1)
+
+    assert torch.equal(prepended[0], images[0])
+    assert torch.equal(prepended[1:], batch)
+    assert torch.equal(appended[:2], batch)
+    assert torch.equal(appended[2], images[0])
+    assert multi_inserted.shape == (4, 1, 1, 3)
+    assert torch.equal(multi_inserted[0], batch[0])
+    assert torch.equal(multi_inserted[1:3], images)
+    assert torch.equal(multi_inserted[3], batch[1])
+
+
+def test_image_to_batch_rejects_out_of_range_index():
+    batch = torch.zeros((2, 1, 1, 3), dtype=torch.float32)
+    image = torch.ones((1, 1, 1, 3), dtype=torch.float32)
+
+    node = ImageToBatch()
+
+    with pytest.raises(ValueError, match="inclusive range"):
+        node.insert(image_batch=batch, image=image, index=3)
+
+
+def test_latent_to_batch_inserts_latent_samples_and_preserves_metadata():
+    latent_batch = {
+        "samples": torch.tensor(
+            [
+                [[[1.0]]],
+                [[[3.0]]],
+            ],
+            dtype=torch.float32,
+        ),
+        "noise_mask": torch.tensor([[[0.1]], [[0.3]]], dtype=torch.float32),
+        "batch_index": [10, 30],
+        "extra": "preserved",
+    }
+    latent = {
+        "samples": torch.tensor([[[[2.0]]]], dtype=torch.float32),
+        "noise_mask": torch.tensor([[[0.2]]], dtype=torch.float32),
+        "batch_index": [20],
+    }
+
+    node = LatentToBatch()
+    (output,) = node.insert(latent_batch=latent_batch, latent=latent, index=1)
+
+    assert output["extra"] == "preserved"
+    assert output["batch_index"] == [10, 20, 30]
+    assert torch.equal(output["samples"][:, 0, 0, 0], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.allclose(output["noise_mask"][:, 0, 0], torch.tensor([0.1, 0.2, 0.3]))
+
+
+def test_latent_to_batch_expands_singleton_noise_mask_for_inserted_batch():
+    latent_batch = {
+        "samples": torch.zeros((2, 1, 1, 1), dtype=torch.float32),
+        "noise_mask": torch.zeros((2, 1, 1), dtype=torch.float32),
+    }
+    latent = {
+        "samples": torch.ones((2, 1, 1, 1), dtype=torch.float32),
+        "noise_mask": torch.ones((1, 1, 1), dtype=torch.float32),
+    }
+
+    node = LatentToBatch()
+    (output,) = node.insert(latent_batch=latent_batch, latent=latent, index=1)
+
+    assert output["samples"].shape == (4, 1, 1, 1)
+    assert torch.equal(output["samples"][:, 0, 0, 0], torch.tensor([0.0, 1.0, 1.0, 0.0]))
+    assert torch.equal(output["noise_mask"][:, 0, 0], torch.tensor([0.0, 1.0, 1.0, 0.0]))

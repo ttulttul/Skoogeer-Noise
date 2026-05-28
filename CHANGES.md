@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.51 - 2026-05-28
+- Added `ImageToBatch` and `LatentToBatch` nodes for inserting image or latent items into existing batches at a selected index.
+- Added tests for prepend, middle insert, append, multi-item insert, latent metadata preservation, and invalid index handling.
+
 ## 1.2.50 - 2026-05-27
 - Added `Models List`, a list-valued `MODEL` utility node for fan-out workflows that feed multiple model patcher objects into downstream nodes such as native `KSampler`.
 - Added regression coverage for the node contract and ComfyUI's current list-mapping behavior for `KSampler.model`.

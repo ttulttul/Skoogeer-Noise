@@ -158,6 +158,8 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Reorder List](#reorder-list) | `utils/list` | list |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
 | [Image Batch to Latent](#image-batch-to-latent) | `latent/debug` | `LATENT` |
+| [ImageToBatch](#imagetobatch) | `image/batch` | `IMAGE` |
+| [LatentToBatch](#latenttobatch) | `latent/batch` | `LATENT` |
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
 | [Latent Channel Linear Transform](#latent-channel-linear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Nonlinear Transform](#latent-channel-nonlinear-transform) | `latent/channel` | `LATENT` |
@@ -811,6 +813,47 @@ Merges a batch of per-channel grayscale images back into a `LATENT` tensor.
 | `batch_size` | `INT` | `0` | `0..4096` | Original latent batch size (`0` to infer from `channels`). |
 | `channels` | `INT` | `0` | `0..4096` | Channel count per latent sample (`0` to infer from `batch_size`). |
 | `channel_source` | enum | `r` | `r/g/b/mean` | Which channel to use from RGB inputs (mean averages channels). |
+
+---
+
+#### ImageToBatch
+
+Inserts an image or image batch into an existing `IMAGE` batch at a selected batch index.
+Items at and after the index shift right.
+
+- **Menu category:** `image/batch`
+- **Returns:** `IMAGE`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `image_batch` | `IMAGE` | - | - | Existing image batch to insert into. |
+| `image` | `IMAGE` | - | - | Image or image batch to insert. Spatial shape, channels, dtype, and device must match `image_batch`. |
+| `index` | `INT` | `0` | `0..4096` | Insert position. Must be between `0` and the current batch size, inclusive. |
+
+---
+
+#### LatentToBatch
+
+Inserts a latent or latent batch into an existing `LATENT` batch at a selected batch index.
+Items at and after the index shift right.
+
+- **Menu category:** `latent/batch`
+- **Returns:** `LATENT`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `latent_batch` | `LATENT` | - | - | Existing latent batch to insert into. |
+| `latent` | `LATENT` | - | - | Latent or latent batch to insert. Sample shape after the batch dimension, dtype, and device must match `latent_batch`. |
+| `index` | `INT` | `0` | `0..4096` | Insert position. Must be between `0` and the current batch size, inclusive. |
+
+##### Notes
+
+- `noise_mask` is spliced when both inputs provide it; singleton masks are expanded to the matching sample count.
+- Existing `batch_index` metadata is preserved and spliced when present.
 
 ---
 
