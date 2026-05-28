@@ -105,7 +105,7 @@ def test_image_to_batch_inserts_image_at_middle_index():
     image = torch.tensor([[[[2.0, 2.0, 2.0]]]], dtype=torch.float32)
 
     node = ImageToBatch()
-    (output,) = node.insert(image_batch=batch, image=image, index=1)
+    (output,) = node.insert(image_batch=batch, image=image, index=1, mode="insert")
 
     assert output.shape == (3, 1, 1, 3)
     assert torch.equal(output[:, 0, 0, 0], torch.tensor([1.0, 2.0, 3.0]))
@@ -116,9 +116,9 @@ def test_image_to_batch_can_prepend_append_and_insert_image_batches():
     images = torch.full((2, 1, 1, 3), 99.0, dtype=torch.float32)
 
     node = ImageToBatch()
-    (prepended,) = node.insert(image_batch=batch, image=images[:1], index=0)
-    (appended,) = node.insert(image_batch=batch, image=images[:1], index=2)
-    (multi_inserted,) = node.insert(image_batch=batch, image=images, index=1)
+    (prepended,) = node.insert(image_batch=batch, image=images[:1], index=0, mode="insert")
+    (appended,) = node.insert(image_batch=batch, image=images[:1], index=2, mode="insert")
+    (multi_inserted,) = node.insert(image_batch=batch, image=images, index=1, mode="insert")
 
     assert torch.equal(prepended[0], images[0])
     assert torch.equal(prepended[1:], batch)
@@ -136,8 +136,39 @@ def test_image_to_batch_rejects_out_of_range_index():
 
     node = ImageToBatch()
 
-    with pytest.raises(ValueError, match="inclusive range"):
-        node.insert(image_batch=batch, image=image, index=3)
+    with pytest.raises(ValueError, match="replace index"):
+        node.insert(image_batch=batch, image=image, index=2, mode="replace")
+
+
+def test_image_to_batch_replaces_image_at_index_by_default():
+    batch = torch.tensor(
+        [
+            [[[1.0, 1.0, 1.0]]],
+            [[[2.0, 2.0, 2.0]]],
+            [[[3.0, 3.0, 3.0]]],
+        ],
+        dtype=torch.float32,
+    )
+    image = torch.tensor([[[[9.0, 9.0, 9.0]]]], dtype=torch.float32)
+
+    node = ImageToBatch()
+    (output,) = node.insert(image_batch=batch, image=image, index=1)
+
+    assert output.shape == batch.shape
+    assert torch.equal(output[:, 0, 0, 0], torch.tensor([1.0, 9.0, 3.0]))
+
+
+def test_image_to_batch_replaces_multiple_items():
+    batch = torch.arange(4 * 1 * 1 * 3, dtype=torch.float32).reshape(4, 1, 1, 3)
+    images = torch.full((2, 1, 1, 3), 99.0, dtype=torch.float32)
+
+    node = ImageToBatch()
+    (output,) = node.insert(image_batch=batch, image=images, index=1, mode="replace")
+
+    assert output.shape == batch.shape
+    assert torch.equal(output[0], batch[0])
+    assert torch.equal(output[1:3], images)
+    assert torch.equal(output[3], batch[3])
 
 
 def test_latent_to_batch_inserts_latent_samples_and_preserves_metadata():
@@ -160,7 +191,7 @@ def test_latent_to_batch_inserts_latent_samples_and_preserves_metadata():
     }
 
     node = LatentToBatch()
-    (output,) = node.insert(latent_batch=latent_batch, latent=latent, index=1)
+    (output,) = node.insert(latent_batch=latent_batch, latent=latent, index=1, mode="insert")
 
     assert output["extra"] == "preserved"
     assert output["batch_index"] == [10, 20, 30]
@@ -179,8 +210,46 @@ def test_latent_to_batch_expands_singleton_noise_mask_for_inserted_batch():
     }
 
     node = LatentToBatch()
-    (output,) = node.insert(latent_batch=latent_batch, latent=latent, index=1)
+    (output,) = node.insert(latent_batch=latent_batch, latent=latent, index=1, mode="insert")
 
     assert output["samples"].shape == (4, 1, 1, 1)
     assert torch.equal(output["samples"][:, 0, 0, 0], torch.tensor([0.0, 1.0, 1.0, 0.0]))
     assert torch.equal(output["noise_mask"][:, 0, 0], torch.tensor([0.0, 1.0, 1.0, 0.0]))
+
+
+def test_latent_to_batch_replaces_latent_samples_and_metadata_by_default():
+    latent_batch = {
+        "samples": torch.tensor(
+            [
+                [[[1.0]]],
+                [[[2.0]]],
+                [[[3.0]]],
+            ],
+            dtype=torch.float32,
+        ),
+        "noise_mask": torch.tensor([[[0.1]], [[0.2]], [[0.3]]], dtype=torch.float32),
+        "batch_index": [10, 20, 30],
+    }
+    latent = {
+        "samples": torch.tensor([[[[9.0]]]], dtype=torch.float32),
+        "noise_mask": torch.tensor([[[0.9]]], dtype=torch.float32),
+        "batch_index": [90],
+    }
+
+    node = LatentToBatch()
+    (output,) = node.insert(latent_batch=latent_batch, latent=latent, index=1)
+
+    assert output["samples"].shape == latent_batch["samples"].shape
+    assert output["batch_index"] == [10, 90, 30]
+    assert torch.equal(output["samples"][:, 0, 0, 0], torch.tensor([1.0, 9.0, 3.0]))
+    assert torch.allclose(output["noise_mask"][:, 0, 0], torch.tensor([0.1, 0.9, 0.3]))
+
+
+def test_latent_to_batch_rejects_replace_that_would_extend_past_batch_end():
+    latent_batch = {"samples": torch.zeros((2, 1, 1, 1), dtype=torch.float32)}
+    latent = {"samples": torch.ones((2, 1, 1, 1), dtype=torch.float32)}
+
+    node = LatentToBatch()
+
+    with pytest.raises(ValueError, match="cannot fit"):
+        node.insert(latent_batch=latent_batch, latent=latent, index=1, mode="replace")

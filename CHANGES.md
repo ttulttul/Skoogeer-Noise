@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.52 - 2026-05-28
+- Added a `mode` control to `ImageToBatch` and `LatentToBatch`; `replace` is now the default behavior, while `insert` preserves the previous shift-right behavior.
+- Added regression coverage for replacement mode keeping batch size unchanged and for multi-item replacement bounds.
+
 ## 1.2.51 - 2026-05-28
 - Added `ImageToBatch` and `LatentToBatch` nodes for inserting image or latent items into existing batches at a selected index.
 - Added tests for prepend, middle insert, append, multi-item insert, latent metadata preservation, and invalid index handling.

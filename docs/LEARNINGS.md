@@ -1,5 +1,6 @@
 # Learnings
 
+- For batch edit nodes, replacement is the safer default than insertion because users often expect "put this at index N" to preserve batch length; insertion should be an explicit mode because it changes downstream batch cardinality.
 - Batch insertion nodes should splice along tensor dimension 0 and preserve the rest of the ComfyUI object untouched; for latents, `noise_mask` needs explicit batch alignment because a singleton mask may apply to multiple inserted samples.
 - ComfyUI `MODEL` values can be emitted as list outputs with `OUTPUT_IS_LIST = (True,)`; native `KSampler` is not list-aware, so the executor maps it once per model while repeating singleton inputs like seed, steps, conditioning, and latent.
 - Flux.2 latents are 2x2 patchified (128 channels); unpatchify and patchify helpers/nodes let us work at 32 channels with doubled spatial resolution.

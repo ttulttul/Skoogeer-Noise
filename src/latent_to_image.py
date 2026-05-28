@@ -121,14 +121,31 @@ def _extract_grayscale(images: torch.Tensor, channel_source: str) -> torch.Tenso
     raise ValueError(f"Unknown channel_source '{channel_source}', expected r/g/b/mean.")
 
 
-def _insert_tensor_batch(batch: torch.Tensor, item: torch.Tensor, index: int, *, input_name: str) -> torch.Tensor:
+def _splice_tensor_batch(
+    batch: torch.Tensor,
+    item: torch.Tensor,
+    index: int,
+    *,
+    mode: str,
+    input_name: str,
+) -> torch.Tensor:
     index_value = int(index)
     batch_count = int(batch.shape[0])
     item_count = int(item.shape[0])
     if item_count == 0:
-        raise ValueError(f"{input_name} to insert must have a non-empty batch dimension.")
-    if index_value < 0 or index_value > batch_count:
-        raise ValueError(f"index must be in the inclusive range [0, {batch_count}], got {index_value}.")
+        raise ValueError(f"{input_name} to splice must have a non-empty batch dimension.")
+    mode_value = str(mode)
+    if mode_value not in ("replace", "insert"):
+        raise ValueError(f"mode must be 'replace' or 'insert', got '{mode_value}'.")
+    if mode_value == "insert" and (index_value < 0 or index_value > batch_count):
+        raise ValueError(f"insert index must be in the inclusive range [0, {batch_count}], got {index_value}.")
+    if mode_value == "replace" and (index_value < 0 or index_value >= batch_count):
+        raise ValueError(f"replace index must be in the inclusive range [0, {batch_count - 1}], got {index_value}.")
+    if mode_value == "replace" and index_value + item_count > batch_count:
+        raise ValueError(
+            f"replace mode cannot fit {item_count} {input_name} item(s) at index {index_value} "
+            f"in a batch of {batch_count}."
+        )
     if tuple(batch.shape[1:]) != tuple(item.shape[1:]):
         raise ValueError(
             f"{input_name} shape after the batch dimension must match the target batch: "
@@ -140,7 +157,8 @@ def _insert_tensor_batch(batch: torch.Tensor, item: torch.Tensor, index: int, *,
         raise ValueError(f"{input_name} device must match the target batch: got {item.device}, expected {batch.device}.")
 
     before = batch[:index_value]
-    after = batch[index_value:]
+    after_start = index_value if mode_value == "insert" else index_value + item_count
+    after = batch[after_start:]
     return torch.cat((before, item, after), dim=0)
 
 
@@ -300,23 +318,28 @@ class ImageToBatch:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image_batch": ("IMAGE", {"tooltip": "Existing image batch to insert into."}),
-                "image": ("IMAGE", {"tooltip": "Image or image batch to insert at the requested index."}),
+                "image_batch": ("IMAGE", {"tooltip": "Existing image batch to modify."}),
+                "image": ("IMAGE", {"tooltip": "Image or image batch to place at the requested index."}),
                 "index": ("INT", {
                     "default": 0,
                     "min": 0,
                     "max": 4096,
-                    "tooltip": "Batch index where the image is inserted. Existing items at and after this index shift right.",
+                    "tooltip": "Batch index where the image is placed.",
+                }),
+                "mode": (["replace", "insert"], {
+                    "default": "replace",
+                    "tooltip": "replace overwrites existing item(s); insert shifts existing items right.",
                 }),
             }
         }
 
-    def insert(self, image_batch, image, index=0):
+    def insert(self, image_batch, image, index=0, mode="replace"):
         batch = _validate_image_batch(image_batch)
         item = _validate_image_batch(image)
-        output = _insert_tensor_batch(batch, item, index, input_name="IMAGE")
+        output = _splice_tensor_batch(batch, item, index, mode=mode, input_name="IMAGE")
         logger.debug(
-            "ImageToBatch inserted %d image(s) into batch_size=%d at index=%d; output_shape=%s",
+            "ImageToBatch %s %d image(s) in batch_size=%d at index=%d; output_shape=%s",
+            str(mode),
             int(item.shape[0]),
             int(batch.shape[0]),
             int(index),
@@ -335,25 +358,29 @@ class LatentToBatch:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "latent_batch": ("LATENT", {"tooltip": "Existing latent batch to insert into."}),
-                "latent": ("LATENT", {"tooltip": "Latent or latent batch to insert at the requested index."}),
+                "latent_batch": ("LATENT", {"tooltip": "Existing latent batch to modify."}),
+                "latent": ("LATENT", {"tooltip": "Latent or latent batch to place at the requested index."}),
                 "index": ("INT", {
                     "default": 0,
                     "min": 0,
                     "max": 4096,
-                    "tooltip": "Batch index where the latent is inserted. Existing items at and after this index shift right.",
+                    "tooltip": "Batch index where the latent is placed.",
+                }),
+                "mode": (["replace", "insert"], {
+                    "default": "replace",
+                    "tooltip": "replace overwrites existing item(s); insert shifts existing items right.",
                 }),
             }
         }
 
-    def insert(self, latent_batch, latent, index=0):
+    def insert(self, latent_batch, latent, index=0, mode="replace"):
         batch_latent = _validate_latent(latent_batch)
         item_latent = _validate_latent(latent)
         batch_samples: torch.Tensor = batch_latent["samples"]
         item_samples: torch.Tensor = item_latent["samples"]
 
         output = dict(batch_latent)
-        output["samples"] = _insert_tensor_batch(batch_samples, item_samples, index, input_name="LATENT")
+        output["samples"] = _splice_tensor_batch(batch_samples, item_samples, index, mode=mode, input_name="LATENT")
 
         if "noise_mask" in batch_latent or "noise_mask" in item_latent:
             if "noise_mask" not in batch_latent or "noise_mask" not in item_latent:
@@ -368,19 +395,29 @@ class LatentToBatch:
                 int(item_samples.shape[0]),
                 input_name="latent",
             )
-            output["noise_mask"] = _insert_tensor_batch(batch_mask, item_mask, index, input_name="LATENT noise_mask")
+            output["noise_mask"] = _splice_tensor_batch(
+                batch_mask,
+                item_mask,
+                index,
+                mode=mode,
+                input_name="LATENT noise_mask",
+            )
 
         if "batch_index" in batch_latent:
+            index_value = int(index)
+            mode_value = str(mode)
             existing_indices = list(batch_latent["batch_index"])
             inserted_indices = list(item_latent.get("batch_index", range(int(item_samples.shape[0]))))
+            after_start = index_value if mode_value == "insert" else index_value + len(inserted_indices)
             output["batch_index"] = (
-                existing_indices[: int(index)]
+                existing_indices[:index_value]
                 + inserted_indices
-                + existing_indices[int(index):]
+                + existing_indices[after_start:]
             )
 
         logger.debug(
-            "LatentToBatch inserted %d latent sample(s) into batch_size=%d at index=%d; output_shape=%s",
+            "LatentToBatch %s %d latent sample(s) in batch_size=%d at index=%d; output_shape=%s",
+            str(mode),
             int(item_samples.shape[0]),
             int(batch_samples.shape[0]),
             int(index),

@@ -818,8 +818,7 @@ Merges a batch of per-channel grayscale images back into a `LATENT` tensor.
 
 #### ImageToBatch
 
-Inserts an image or image batch into an existing `IMAGE` batch at a selected batch index.
-Items at and after the index shift right.
+Replaces or inserts an image or image batch in an existing `IMAGE` batch at a selected batch index.
 
 - **Menu category:** `image/batch`
 - **Returns:** `IMAGE`
@@ -828,16 +827,16 @@ Items at and after the index shift right.
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `image_batch` | `IMAGE` | - | - | Existing image batch to insert into. |
-| `image` | `IMAGE` | - | - | Image or image batch to insert. Spatial shape, channels, dtype, and device must match `image_batch`. |
-| `index` | `INT` | `0` | `0..4096` | Insert position. Must be between `0` and the current batch size, inclusive. |
+| `image_batch` | `IMAGE` | - | - | Existing image batch to modify. |
+| `image` | `IMAGE` | - | - | Image or image batch to place. Spatial shape, channels, dtype, and device must match `image_batch`. |
+| `index` | `INT` | `0` | `0..4096` | Target batch index. In `replace` mode it must point at an existing item; in `insert` mode it can also equal the current batch size to append. |
+| `mode` | enum | `replace` | `replace/insert` | `replace` overwrites existing item(s). `insert` shifts existing items right. |
 
 ---
 
 #### LatentToBatch
 
-Inserts a latent or latent batch into an existing `LATENT` batch at a selected batch index.
-Items at and after the index shift right.
+Replaces or inserts a latent or latent batch in an existing `LATENT` batch at a selected batch index.
 
 - **Menu category:** `latent/batch`
 - **Returns:** `LATENT`
@@ -846,9 +845,10 @@ Items at and after the index shift right.
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `latent_batch` | `LATENT` | - | - | Existing latent batch to insert into. |
-| `latent` | `LATENT` | - | - | Latent or latent batch to insert. Sample shape after the batch dimension, dtype, and device must match `latent_batch`. |
-| `index` | `INT` | `0` | `0..4096` | Insert position. Must be between `0` and the current batch size, inclusive. |
+| `latent_batch` | `LATENT` | - | - | Existing latent batch to modify. |
+| `latent` | `LATENT` | - | - | Latent or latent batch to place. Sample shape after the batch dimension, dtype, and device must match `latent_batch`. |
+| `index` | `INT` | `0` | `0..4096` | Target batch index. In `replace` mode it must point at an existing item; in `insert` mode it can also equal the current batch size to append. |
+| `mode` | enum | `replace` | `replace/insert` | `replace` overwrites existing item(s). `insert` shifts existing items right. |
 
 ##### Notes
 
