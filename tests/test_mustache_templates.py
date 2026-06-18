@@ -10,9 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.mustache_templates import (  # noqa: E402
     ConcatenateLists,
     JoinTextList,
-    MergeMustacheVariables,
-    MergeMustacheVariableLists,
+    MergeMustacheVariableDefs,
+    MergeMustacheVariableSets,
     MustacheVariable,
+    MustacheVariableSet,
     MustacheTemplate,
     MustacheVariableSampler,
     MustacheVariables,
@@ -746,8 +747,11 @@ def test_mustache_template_node_ports_use_type_revealing_names():
     assert MustacheVariable.RETURN_NAMES == ("variable_defs",)
     assert tuple(MustacheVariable.INPUT_TYPES()["required"]) == ("variable_name", "variable_values")
 
-    assert MergeMustacheVariables.RETURN_NAMES == ("variable_defs",)
-    assert tuple(MergeMustacheVariables.INPUT_TYPES()["required"]) == (
+    assert MustacheVariableSet.RETURN_NAMES == ("variable_sets",)
+    assert tuple(MustacheVariableSet.INPUT_TYPES()["required"]) == ("variable_name", "variable_value")
+
+    assert MergeMustacheVariableDefs.RETURN_NAMES == ("variable_defs",)
+    assert tuple(MergeMustacheVariableDefs.INPUT_TYPES()["required"]) == (
         "variable_defs_1",
         "variable_defs_2",
         "conflict_mode",
@@ -767,8 +771,8 @@ def test_mustache_template_node_ports_use_type_revealing_names():
     assert JoinTextList.RETURN_NAMES == ("joined_text", "count")
     assert tuple(JoinTextList.INPUT_TYPES()["required"]) == ("text_items", "separator")
 
-    assert MergeMustacheVariableLists.RETURN_NAMES == ("variable_sets",)
-    assert tuple(MergeMustacheVariableLists.INPUT_TYPES()["required"]) == ("variable_sets_1", "variable_sets_2")
+    assert MergeMustacheVariableSets.RETURN_NAMES == ("variable_sets",)
+    assert tuple(MergeMustacheVariableSets.INPUT_TYPES()["required"]) == ("variable_sets_1", "variable_sets_2")
 
     assert ReorderList.RETURN_NAMES == ("list_items",)
     assert tuple(ReorderList.INPUT_TYPES()["required"]) == ("list_items", "mode", "seed")
@@ -796,6 +800,23 @@ def test_mustache_template_nodes_accept_renamed_keyword_inputs():
 
     assert joined_text == "fox, wolf"
     assert count == 2
+
+
+def test_mustache_variable_set_node_returns_single_variable_set():
+    (variable_sets,) = MustacheVariableSet().build(variable_name="animal", variable_value="fox")
+
+    assert variable_sets == [{"animal": "fox"}]
+
+    (rendered_text,) = MustacheTemplate().render(
+        variable_sets=variable_sets,
+        template="A {{animal}}.",
+    )
+    assert rendered_text == ["A fox."]
+
+
+def test_mustache_variable_set_node_rejects_multi_item_value_input():
+    with pytest.raises(ValueError, match="variable value input must resolve to a single value"):
+        MustacheVariableSet().build("animal", ["fox", "wolf"])
 
 
 def test_mustache_variables_node_returns_typed_mapping():
@@ -1053,7 +1074,7 @@ def test_mustache_variable_node_rejects_multi_item_key_input():
 
 
 def test_merge_mustache_variables_keep_first_preserves_first_conflict():
-    node = MergeMustacheVariables()
+    node = MergeMustacheVariableDefs()
 
     (variables,) = node.merge(
         {"animal": ["fox"], "lens": ["35mm"]},
@@ -1069,7 +1090,7 @@ def test_merge_mustache_variables_keep_first_preserves_first_conflict():
 
 
 def test_merge_mustache_variables_keep_second_overwrites_conflict():
-    node = MergeMustacheVariables()
+    node = MergeMustacheVariableDefs()
 
     (variables,) = node.merge(
         {"animal": ["fox"], "lens": ["35mm"]},
@@ -1085,7 +1106,7 @@ def test_merge_mustache_variables_keep_second_overwrites_conflict():
 
 
 def test_merge_mustache_variables_merge_values_appends_conflicting_values():
-    node = MergeMustacheVariables()
+    node = MergeMustacheVariableDefs()
 
     (variables,) = node.merge(
         {"animal": ["fox"], "lens": ["35mm"]},
@@ -1101,7 +1122,7 @@ def test_merge_mustache_variables_merge_values_appends_conflicting_values():
 
 
 def test_merge_mustache_variables_merge_values_rejects_weighted_conflicts():
-    node = MergeMustacheVariables()
+    node = MergeMustacheVariableDefs()
     left = parse_mustache_variables_yaml(
         "animal:\n"
         "  - fox:0.7\n"
@@ -1246,7 +1267,7 @@ def test_concatenate_lists_joins_mustache_variable_list_batches():
 
 
 def test_merge_mustache_variable_lists_merges_entries_by_index():
-    node = MergeMustacheVariableLists()
+    node = MergeMustacheVariableSets()
 
     (items,) = node.merge(
         [
@@ -1276,7 +1297,7 @@ def test_merge_mustache_variable_lists_merges_entries_by_index():
 
 
 def test_merge_mustache_variable_lists_broadcasts_singleton_side():
-    node = MergeMustacheVariableLists()
+    node = MergeMustacheVariableSets()
 
     (items,) = node.merge(
         [
@@ -1295,7 +1316,7 @@ def test_merge_mustache_variable_lists_broadcasts_singleton_side():
 
 
 def test_merge_mustache_variable_lists_rejects_incompatible_lengths():
-    node = MergeMustacheVariableLists()
+    node = MergeMustacheVariableSets()
 
     with pytest.raises(ValueError, match="different lengths unless one side has exactly one entry"):
         node.merge(

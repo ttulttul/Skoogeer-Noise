@@ -644,6 +644,15 @@ def build_mustache_variable(variable_name, variable_values) -> MustacheVariables
     return {variable_name: values}
 
 
+def build_mustache_variable_set(variable_name, variable_value) -> MustacheVariableList:
+    variable_name = _normalize_mustache_variable_name_input(variable_name)
+    raw_value = _unwrap_single_input_value(variable_value, input_name="Mustache variable value")
+    value = _coerce_yaml_scalar_to_string(raw_value, variable_name=variable_name)
+
+    logger.debug("Built single mustache variable set for '%s'.", variable_name)
+    return [{variable_name: value}]
+
+
 def _normalize_mustache_variables_input(variables, *, input_name: str) -> MustacheVariablesDict:
     if variables is None:
         return {}
@@ -1587,6 +1596,34 @@ class MustacheVariable:
         return (variables,)
 
 
+class MustacheVariableSet:
+    CATEGORY = "text/template"
+    RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
+    RETURN_NAMES = ("variable_sets",)
+    FUNCTION = "build"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "variable_name": ("STRING", {
+                    "default": _DEFAULT_SINGLE_VARIABLE_KEY,
+                    "tooltip": "Variable name to define in the returned single-entry MUSTACHE_VARIABLE_LIST.",
+                }),
+                "variable_value": ("STRING", {
+                    "default": _DEFAULT_SINGLE_VARIABLE_VALUE,
+                    "multiline": True,
+                    "tooltip": "Concrete value to store under variable_name in the returned variable set.",
+                }),
+            },
+        }
+
+    def build(self, variable_name, variable_value):
+        variable_sets = build_mustache_variable_set(variable_name, variable_value)
+        logger.debug("MustacheVariableSet node produced one concrete variable setting.")
+        return (variable_sets,)
+
+
 class MustacheVariableSampler:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
@@ -1647,7 +1684,7 @@ class MustacheVariableSampler:
         return (sampled_variables,)
 
 
-class MergeMustacheVariables:
+class MergeMustacheVariableDefs:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLES",)
     RETURN_NAMES = ("variable_defs",)
@@ -1834,7 +1871,7 @@ class ConcatenateLists:
         return (combined,)
 
 
-class MergeMustacheVariableLists:
+class MergeMustacheVariableSets:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
     RETURN_NAMES = ("variable_sets",)
@@ -1860,9 +1897,10 @@ class MergeMustacheVariableLists:
 NODE_CLASS_MAPPINGS = {
     "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
-    "MergeMustacheVariables": MergeMustacheVariables,
-    "MergeMustacheVariableLists": MergeMustacheVariableLists,
+    "MergeMustacheVariableDefs": MergeMustacheVariableDefs,
+    "MergeMustacheVariableSets": MergeMustacheVariableSets,
     "MustacheVariable": MustacheVariable,
+    "MustacheVariableSet": MustacheVariableSet,
     "MustacheVariables": MustacheVariables,
     "MustacheVariableSampler": MustacheVariableSampler,
     "MustacheTemplate": MustacheTemplate,
@@ -1872,9 +1910,10 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
-    "MergeMustacheVariables": "Merge Mustache Variables",
-    "MergeMustacheVariableLists": "Merge Mustache Variable Lists",
+    "MergeMustacheVariableDefs": "Merge Mustache Variable Defs",
+    "MergeMustacheVariableSets": "Merge Mustache Variable Sets",
     "MustacheVariable": "Mustache Variable",
+    "MustacheVariableSet": "Mustache Variable Set",
     "MustacheVariables": "Mustache Variables",
     "MustacheVariableSampler": "Mustache Variable Sampler",
     "MustacheTemplate": "Mustache Template",

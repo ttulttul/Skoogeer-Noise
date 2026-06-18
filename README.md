@@ -148,12 +148,13 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Image Noise](#image-noise) | `image/perturb` | `IMAGE` |
 | [Next Seeds](#next-seeds) | `utils/seed` | `INT`, `INT`, `INT`, `INT` |
 | [Mustache Variable](#mustache-variable) | `text/template` | `MUSTACHE_VARIABLES` |
+| [Mustache Variable Set](#mustache-variable-set) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Variables](#mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
-| [Merge Mustache Variables](#merge-mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
+| [Merge Mustache Variable Defs](#merge-mustache-variable-defs) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
 | [Join Text List](#join-text-list) | `text/debug` | `STRING`, `INT` |
-| [Merge Mustache Variable Lists](#merge-mustache-variable-lists) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
+| [Merge Mustache Variable Sets](#merge-mustache-variable-sets) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Concatenate Lists](#concatenate-lists) | `utils/list` | list |
 | [Reorder List](#reorder-list) | `utils/list` | list |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
@@ -433,6 +434,37 @@ Builds a one-key `MUSTACHE_VARIABLES` mapping without writing YAML manually. Use
 
 ---
 
+#### Mustache Variable Set
+
+Builds a single-entry `MUSTACHE_VARIABLE_LIST` from one concrete key/value pair. Use it when you want to feed a simple value directly into `Mustache Template` without creating `MUSTACHE_VARIABLES` definitions and sampling them first.
+
+- **Menu category:** `text/template`
+- **Returns:** `MUSTACHE_VARIABLE_LIST`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `variable_name` | `STRING` | `animal` | – | Variable name to define in the returned concrete variable set. The name is trimmed, must be non-empty, and cannot use reserved/internal names. |
+| `variable_value` | `STRING` | `fox` | multiline | Concrete value to store under `variable_name`. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `variable_sets` | `MUSTACHE_VARIABLE_LIST` | A one-item list containing one concrete variable-setting dictionary. |
+
+##### Example
+
+- `variable_name = animal`, `variable_value = fox` returns `[{"animal": "fox"}]`
+
+##### Notes
+
+- This node returns `MUSTACHE_VARIABLE_LIST`, not `MUSTACHE_VARIABLES`, so it can connect directly to `Mustache Template`.
+- Use `Mustache Variable` instead when you want to define candidate values that should still pass through `Mustache Variable Sampler`.
+
+---
+
 #### Mustache Variables
 
 Parses a YAML mapping of variable names to candidate values and packages it as a `MUSTACHE_VARIABLES` dictionary for downstream templating nodes.
@@ -563,7 +595,7 @@ Here both placeholders use the already-resolved `color` value from the current v
 
 ---
 
-#### Merge Mustache Variables
+#### Merge Mustache Variable Defs
 
 Merges two `MUSTACHE_VARIABLES` mappings into one. Use this when two branches define candidate pools and you want one combined variable-definition dictionary before `Mustache Variable Sampler`.
 
@@ -588,7 +620,7 @@ Merges two `MUSTACHE_VARIABLES` mappings into one. Use this when two branches de
 
 ##### Notes
 
-- This node merges variable definitions, not concrete sampled entries. If you already have `MUSTACHE_VARIABLE_LIST` outputs, use `Merge Mustache Variable Lists` instead.
+- This node merges variable definitions, not concrete sampled entries. If you already have `MUSTACHE_VARIABLE_LIST` outputs, use `Merge Mustache Variable Sets` instead.
 - `merge_values` follows the same duplicate-key semantics as multi-input `Mustache Variables`: it appends plain value lists in order, but conflicting weighted definitions still raise an error.
 
 ---
@@ -701,7 +733,7 @@ Mustache Template -> Join Text List -> Preview as Text
 
 ---
 
-#### Merge Mustache Variable Lists
+#### Merge Mustache Variable Sets
 
 Merges two `MUSTACHE_VARIABLE_LIST` inputs entry-by-entry so each output entry contains the union of keys from both sides. This is the node to use when one branch produces fields like `camera_lens` and another produces fields like `person_masc`, and your downstream template needs both in the same rendered entry.
 
@@ -782,7 +814,7 @@ Concatenates two list-valued inputs into one list without changing the item type
 
 - This node is generic and works with `MUSTACHE_VARIABLE_LIST`, `STRING` lists, and other list-valued sockets.
 - For the mustache workflow, the list-valued node is `Mustache Variable Sampler`; `Mustache Variables` itself still returns a `MUSTACHE_VARIABLES` mapping.
-- For mustache workflows, use `Merge Mustache Variable Lists` instead when a downstream template needs each output entry to include keys from both input branches.
+- For mustache workflows, use `Merge Mustache Variable Sets` instead when a downstream template needs each output entry to include keys from both input branches.
 
 ---
 
