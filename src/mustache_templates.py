@@ -609,14 +609,14 @@ def _unwrap_single_input_value(value, *, input_name: str):
     return unwrapped
 
 
-def _normalize_mustache_variable_key_input(key) -> str:
-    raw_key = _unwrap_single_input_value(key, input_name="Mustache variable key")
-    variable_name = str(raw_key).strip()
+def _normalize_mustache_variable_name_input(variable_name_input) -> str:
+    raw_variable_name = _unwrap_single_input_value(variable_name_input, input_name="Mustache variable name")
+    variable_name = str(raw_variable_name).strip()
     if not variable_name:
-        raise ValueError("Mustache variable key must be non-empty.")
+        raise ValueError("Mustache variable name must be non-empty.")
     if variable_name in _RESERVED_VARIABLE_KEYS:
         raise ValueError(f"Mustache variable name '{variable_name}' is reserved.")
-    _raise_for_unresolved_mustache_variables(variable_name, context="Mustache variable key")
+    _raise_for_unresolved_mustache_variables(variable_name, context="Mustache variable name")
     return variable_name
 
 
@@ -629,10 +629,10 @@ def _flatten_mustache_variable_value_input(value, *, variable_name: str, flatten
     flattened.append(_coerce_yaml_scalar_to_string(value, variable_name=variable_name))
 
 
-def build_mustache_variable(key, value) -> MustacheVariablesDict:
-    variable_name = _normalize_mustache_variable_key_input(key)
+def build_mustache_variable(variable_name, variable_values) -> MustacheVariablesDict:
+    variable_name = _normalize_mustache_variable_name_input(variable_name)
     values: List[str] = []
-    _flatten_mustache_variable_value_input(value, variable_name=variable_name, flattened=values)
+    _flatten_mustache_variable_value_input(variable_values, variable_name=variable_name, flattened=values)
     if not values:
         raise ValueError(f"Mustache variable '{variable_name}' must contain at least one value.")
 
@@ -1511,7 +1511,7 @@ def render_mustache_template_list(
 class MustacheVariables:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLES",)
-    RETURN_NAMES = ("variables",)
+    RETURN_NAMES = ("variable_defs",)
     INPUT_IS_LIST = True
     FUNCTION = "parse_variables"
 
@@ -1525,13 +1525,13 @@ class MustacheVariables:
                     "tooltip": (
                         "YAML mapping of variable names to values. Each key becomes a mustache variable and each "
                         "value should usually be a list of render options. Scalar values are accepted as shorthand "
-                        "for a single-item list. If the optional variables input is connected, this YAML is treated "
+                        "for a single-item list. If the optional variable_sets input is connected, this YAML is treated "
                         "as a mustache template and rendered once per variable-setting entry before parsing."
                     ),
                 }),
             },
             "optional": {
-                "variables": ("MUSTACHE_VARIABLE_LIST", {
+                "variable_sets": ("MUSTACHE_VARIABLE_LIST", {
                     "tooltip": (
                         "Optional concrete variable settings used to render templated YAML before parsing. This lets "
                         "you chain one mustache-variable stage into another."
@@ -1540,8 +1540,8 @@ class MustacheVariables:
             },
         }
 
-    def parse_variables(self, yaml_text, variables=None):
-        variable_list = _normalize_mustache_variable_list_input(variables)
+    def parse_variables(self, yaml_text, variable_sets=None):
+        variable_list = _normalize_mustache_variable_list_input(variable_sets)
         rendered_yaml_inputs = render_mustache_yaml_inputs(yaml_text, variable_list)
         variables = parse_mustache_variables_inputs(rendered_yaml_inputs)
         logger.debug(
@@ -1554,7 +1554,7 @@ class MustacheVariables:
 class MustacheVariable:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLES",)
-    RETURN_NAMES = ("variables",)
+    RETURN_NAMES = ("variable_defs",)
     INPUT_IS_LIST = (False, True)
     FUNCTION = "build"
 
@@ -1562,23 +1562,23 @@ class MustacheVariable:
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "key": ("STRING", {
+                "variable_name": ("STRING", {
                     "default": _DEFAULT_SINGLE_VARIABLE_KEY,
                     "tooltip": "Variable name to define in the returned MUSTACHE_VARIABLES mapping.",
                 }),
-                "value": ("STRING", {
+                "variable_values": ("STRING", {
                     "default": _DEFAULT_SINGLE_VARIABLE_VALUE,
                     "multiline": True,
                     "tooltip": (
-                        "Value or list-valued STRING input to store under key. A scalar becomes a single-item "
+                        "Value or list-valued STRING input to store under variable_name. A scalar becomes a single-item "
                         "candidate list; a connected STRING list becomes multiple candidate values."
                     ),
                 }),
             },
         }
 
-    def build(self, key, value):
-        variables = build_mustache_variable(key, value)
+    def build(self, variable_name, variable_values):
+        variables = build_mustache_variable(variable_name, variable_values)
         logger.debug(
             "MustacheVariable node produced %d key with %d candidate values.",
             len(_visible_mustache_variable_keys(variables)),
@@ -1590,14 +1590,14 @@ class MustacheVariable:
 class MustacheVariableSampler:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
-    RETURN_NAMES = ("variables",)
+    RETURN_NAMES = ("variable_sets",)
     FUNCTION = "sample"
 
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "variables": ("MUSTACHE_VARIABLES", {
+                "variable_defs": ("MUSTACHE_VARIABLES", {
                     "tooltip": "Mustache variables mapping to expand into concrete variable settings.",
                 }),
                 "sampling_mode": (_SAMPLING_METHODS, {
@@ -1627,12 +1627,12 @@ class MustacheVariableSampler:
             },
         }
 
-    def sample(self, variables: MustacheVariablesDict, sampling_mode: str, seed: int, limit: int):
-        if not isinstance(variables, dict):
-            raise ValueError(f"MUSTACHE_VARIABLES input must be a dictionary, got {type(variables).__name__}.")
+    def sample(self, variable_defs: MustacheVariablesDict, sampling_mode: str, seed: int, limit: int):
+        if not isinstance(variable_defs, dict):
+            raise ValueError(f"MUSTACHE_VARIABLES input must be a dictionary, got {type(variable_defs).__name__}.")
 
         sampled_variables = sample_mustache_variable_list(
-            variables,
+            variable_defs,
             sampling_mode=str(sampling_mode),
             seed=int(seed),
             limit=int(limit),
@@ -1650,17 +1650,17 @@ class MustacheVariableSampler:
 class MergeMustacheVariables:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLES",)
-    RETURN_NAMES = ("variables",)
+    RETURN_NAMES = ("variable_defs",)
     FUNCTION = "merge"
 
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "variables_1": ("MUSTACHE_VARIABLES", {
+                "variable_defs_1": ("MUSTACHE_VARIABLES", {
                     "tooltip": "First mustache variable definition mapping to merge.",
                 }),
-                "variables_2": ("MUSTACHE_VARIABLES", {
+                "variable_defs_2": ("MUSTACHE_VARIABLES", {
                     "tooltip": "Second mustache variable definition mapping to merge.",
                 }),
                 "conflict_mode": (_MUSTACHE_VARIABLE_CONFLICT_MODES, {
@@ -1673,14 +1673,14 @@ class MergeMustacheVariables:
             },
         }
 
-    def merge(self, variables_1, variables_2, conflict_mode):
-        return (merge_mustache_variables_dicts(variables_1, variables_2, str(conflict_mode)),)
+    def merge(self, variable_defs_1, variable_defs_2, conflict_mode):
+        return (merge_mustache_variables_dicts(variable_defs_1, variable_defs_2, str(conflict_mode)),)
 
 
 class MustacheTemplate:
     CATEGORY = "text/template"
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("text",)
+    RETURN_NAMES = ("rendered_text",)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "render"
 
@@ -1688,7 +1688,7 @@ class MustacheTemplate:
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "variables": ("MUSTACHE_VARIABLE_LIST", {
+                "variable_sets": ("MUSTACHE_VARIABLE_LIST", {
                     "tooltip": (
                         "Concrete mustache variable settings generated by Mustache Variable Sampler. One rendered "
                         "prompt is produced for each list entry."
@@ -1705,11 +1705,11 @@ class MustacheTemplate:
             },
         }
 
-    def render(self, variables: MustacheVariableList, template: str):
-        if not isinstance(variables, list):
-            raise ValueError(f"MUSTACHE_VARIABLE_LIST input must be a list, got {type(variables).__name__}.")
+    def render(self, variable_sets: MustacheVariableList, template: str):
+        if not isinstance(variable_sets, list):
+            raise ValueError(f"MUSTACHE_VARIABLE_LIST input must be a list, got {type(variable_sets).__name__}.")
 
-        rendered_outputs = render_mustache_template_list(template, variables)
+        rendered_outputs = render_mustache_template_list(template, variable_sets)
         logger.debug("MustacheTemplate node rendered %d outputs.", len(rendered_outputs))
         return (rendered_outputs,)
 
@@ -1717,7 +1717,7 @@ class MustacheTemplate:
 class JoinTextList:
     CATEGORY = "text/debug"
     RETURN_TYPES = ("STRING", "INT")
-    RETURN_NAMES = ("text", "count")
+    RETURN_NAMES = ("joined_text", "count")
     INPUT_IS_LIST = (True,)
     FUNCTION = "join_text"
 
@@ -1725,7 +1725,7 @@ class JoinTextList:
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "text": ("STRING", {
+                "text_items": ("STRING", {
                     "tooltip": (
                         "List of text values to join into a single previewable string. Connect a list-valued "
                         "STRING output such as Mustache Template here."
@@ -1742,10 +1742,10 @@ class JoinTextList:
             },
         }
 
-    def join_text(self, text, separator):
+    def join_text(self, text_items, separator):
         decoded_separator = _decode_text_separator(_unwrap_singleton_list(separator))
-        joined = decoded_separator.join(str(item) for item in text)
-        count = len(text)
+        joined = decoded_separator.join(str(item) for item in text_items)
+        count = len(text_items)
         logger.debug(
             "JoinTextList node joined %d text items into one preview string using separator length %d.",
             count,
@@ -1757,7 +1757,7 @@ class JoinTextList:
 class ReorderList:
     CATEGORY = "utils/list"
     RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("items",)
+    RETURN_NAMES = ("list_items",)
     INPUT_IS_LIST = True
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "reorder"
@@ -1766,7 +1766,7 @@ class ReorderList:
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "items": ("*", {
+                "list_items": ("*", {
                     "tooltip": "List-valued input to reorder. The node preserves the item type and returns a reordered list.",
                 }),
                 "mode": (_REORDER_MODES, {
@@ -1782,10 +1782,10 @@ class ReorderList:
             },
         }
 
-    def reorder(self, items, mode, seed):
+    def reorder(self, list_items, mode, seed):
         normalized_mode = _validate_reorder_mode(mode[0] if isinstance(mode, list) and mode else mode)
         seed_value = int(seed[0] if isinstance(seed, list) and seed else seed) & _SEED_MASK_64
-        values = list(items)
+        values = list(list_items)
 
         if normalized_mode == "reverse":
             reordered = list(reversed(values))
@@ -1805,7 +1805,7 @@ class ReorderList:
 class ConcatenateLists:
     CATEGORY = "utils/list"
     RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("items",)
+    RETURN_NAMES = ("list_items",)
     INPUT_IS_LIST = (True, True)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "concatenate"
@@ -1814,21 +1814,21 @@ class ConcatenateLists:
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "items_1": ("*", {
+                "list_items_1": ("*", {
                     "tooltip": "First list-valued input to concatenate.",
                 }),
-                "items_2": ("*", {
-                    "tooltip": "Second list-valued input to concatenate after items_1.",
+                "list_items_2": ("*", {
+                    "tooltip": "Second list-valued input to concatenate after list_items_1.",
                 }),
             },
         }
 
-    def concatenate(self, items_1, items_2):
-        combined = list(items_1) + list(items_2)
+    def concatenate(self, list_items_1, list_items_2):
+        combined = list(list_items_1) + list(list_items_2)
         logger.debug(
             "ConcatenateLists node concatenated %d and %d items into %d items.",
-            len(items_1),
-            len(items_2),
+            len(list_items_1),
+            len(list_items_2),
             len(combined),
         )
         return (combined,)
@@ -1837,24 +1837,24 @@ class ConcatenateLists:
 class MergeMustacheVariableLists:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLE_LIST",)
-    RETURN_NAMES = ("items",)
+    RETURN_NAMES = ("variable_sets",)
     FUNCTION = "merge"
 
     @classmethod
     def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
         return {
             "required": {
-                "items_1": ("MUSTACHE_VARIABLE_LIST", {
+                "variable_sets_1": ("MUSTACHE_VARIABLE_LIST", {
                     "tooltip": "First mustache variable-setting list to merge.",
                 }),
-                "items_2": ("MUSTACHE_VARIABLE_LIST", {
-                    "tooltip": "Second mustache variable-setting list to merge into items_1.",
+                "variable_sets_2": ("MUSTACHE_VARIABLE_LIST", {
+                    "tooltip": "Second mustache variable-setting list to merge into variable_sets_1.",
                 }),
             },
         }
 
-    def merge(self, items_1, items_2):
-        return (merge_mustache_variable_lists(items_1, items_2),)
+    def merge(self, variable_sets_1, variable_sets_2):
+        return (merge_mustache_variable_lists(variable_sets_1, variable_sets_2),)
 
 
 NODE_CLASS_MAPPINGS = {

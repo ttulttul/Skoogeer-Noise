@@ -400,6 +400,13 @@ This is the MurmurHash3 64-bit finalizer, used here as a strong bit-mixing funct
 
 ### Text Templates
 
+Mustache ports use shape-oriented names:
+
+- `variable_defs` means `MUSTACHE_VARIABLES`, the variable-definition dictionary.
+- `variable_sets` means `MUSTACHE_VARIABLE_LIST`, the sampled concrete assignment list.
+- `list_items` means a generic list-valued socket.
+- `text_items` means a list-valued `STRING` socket.
+
 #### Mustache Variable
 
 Builds a one-key `MUSTACHE_VARIABLES` mapping without writing YAML manually. Use it when you already have a variable name and either one string or a list-valued `STRING` input that should become that variable's candidate values.
@@ -411,13 +418,13 @@ Builds a one-key `MUSTACHE_VARIABLES` mapping without writing YAML manually. Use
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `key` | `STRING` | `animal` | – | Variable name to define. The key is trimmed, must be non-empty, and cannot use reserved/internal names. |
-| `value` | `STRING` or `STRING` list | `fox` | multiline | Scalar values are wrapped into a one-item candidate list. If a list-valued `STRING` input is connected, every item becomes one candidate value under `key`, in order. |
+| `variable_name` | `STRING` | `animal` | – | Variable name to define. The name is trimmed, must be non-empty, and cannot use reserved/internal names. |
+| `variable_values` | `STRING` or `STRING` list | `fox` | multiline | Scalar values are wrapped into a one-item candidate list. If a list-valued `STRING` input is connected, every item becomes one candidate value under `variable_name`, in order. |
 
 ##### Example
 
-- `key = animal`, `value = fox` returns `{"animal": ["fox"]}`
-- `key = animal`, `value = ["fox", "wolf", "cat"]` returns `{"animal": ["fox", "wolf", "cat"]}`
+- `variable_name = animal`, `variable_values = fox` returns `{"animal": ["fox"]}`
+- `variable_name = animal`, `variable_values = ["fox", "wolf", "cat"]` returns `{"animal": ["fox", "wolf", "cat"]}`
 
 ##### Notes
 
@@ -441,7 +448,7 @@ For a larger tracked YAML sample that follows that guide's layered approach and 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
 | `yaml_text` | `STRING` or `STRING` list | sample YAML | multiline | YAML mapping of variable names to values, or a YAML list of mappings. Lists of scalar values are the normal form for each variable; scalar values are accepted as shorthand and are wrapped into a one-item list. Each final value is coerced to text before rendering. When a list of YAML strings is provided, all mappings are merged together. |
-| `variables` | `MUSTACHE_VARIABLE_LIST` | – | optional | Optional second-stage templating input. In the normal case you define variables directly in `yaml_text` and reference them there. Connect this only when you want upstream concrete variable settings to render the YAML before it is parsed. |
+| `variable_sets` | `MUSTACHE_VARIABLE_LIST` | – | optional | Optional second-stage templating input. In the normal case you define variables directly in `yaml_text` and reference them there. Connect this only when you want upstream concrete variable settings to render the YAML before it is parsed. |
 
 ##### Example YAML
 
@@ -536,12 +543,12 @@ Here both placeholders use the already-resolved `color` value from the current v
 - Duplicate variable names within one YAML input now raise an error instead of being merged silently.
 - When multiple YAML strings are provided, repeated keys are merged by appending their values in input order.
 - By default, `Mustache Variables` is self-contained: define the variables in `yaml_text`, and other entries in that same YAML can reference them directly.
-- If `variables` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used only as an extra pre-rendering source before parsing.
-- That pre-render is now partial: placeholders satisfied by the upstream `variables` input are rendered first, while unresolved placeholders are left in place for the later lazy local-reference pass.
+- If `variable_sets` is connected, `yaml_text` stays as the node's YAML template and the upstream `MUSTACHE_VARIABLE_LIST` is used only as an extra pre-rendering source before parsing.
+- That pre-render is now partial: placeholders satisfied by the upstream `variable_sets` input are rendered first, while unresolved placeholders are left in place for the later lazy local-reference pass.
 - This is the intended way to chain stages such as `Mustache Variables -> Mustache Variable Sampler -> Reorder List -> Mustache Variables`.
 - Do not wire a `MUSTACHE_VARIABLE_LIST` into `yaml_text`; that replaces the YAML template instead of rendering it.
 - Variable values may reference any other variable defined in the same YAML, regardless of source order. Those references stay lazy inside `MUSTACHE_VARIABLES` and are only rendered when `Mustache Variable Sampler` synthesizes concrete settings.
-- Local template references normally point to variables defined somewhere in that same YAML. The optional `variables` input only matters for chained or second-stage templating. Referencing a name that exists in neither place raises an error.
+- Local template references normally point to variables defined somewhere in that same YAML. The optional `variable_sets` input only matters for chained or second-stage templating. Referencing a name that exists in neither place raises an error.
 - Placeholder instance settings are written inside the mustache expression, such as `{{color:static}}`, `{{color:repeat}}`, `{{color:lowercase}}`, `{{color:propercase}}`, `{{color:uppercase}}`, or `{{color:notrim}}`. Escape a literal colon in the variable name as `\:` if needed.
 - By default, placeholders trim surrounding whitespace from the filled-in value and use `randomize` behavior during lazy expansion. Use `notrim` to preserve surrounding whitespace and `static` to opt out of per-instantiation random choice.
 - Multiple compatible settings can be combined with commas, such as `{{color:static,lowercase}}` or `{{color:uppercase,notrim}}`.
@@ -552,7 +559,7 @@ Here both placeholders use the already-resolved `color` value from the current v
 - If the YAML scalar itself needs quotes, keep the weight inside the quotes for canonical YAML, for example `"my item:0.3"`. The parser also accepts the shorthand `"my item":0.3` and normalizes it before YAML parsing.
 - If only some values for a variable use a `:probability` suffix, the unspecified values split the remaining probability mass evenly. If every value is weighted explicitly, their probabilities must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
-- The `variables` input tolerates nested list wrappers from upstream list utilities and concatenation nodes, as long as the leaves are variable-setting dictionaries.
+- The `variable_sets` input tolerates nested list wrappers from upstream list utilities and concatenation nodes, as long as the leaves are variable-setting dictionaries.
 
 ---
 
@@ -567,17 +574,17 @@ Merges two `MUSTACHE_VARIABLES` mappings into one. Use this when two branches de
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `variables_1` | `MUSTACHE_VARIABLES` | – | – | First variable-definition mapping. |
-| `variables_2` | `MUSTACHE_VARIABLES` | – | – | Second variable-definition mapping. |
+| `variable_defs_1` | `MUSTACHE_VARIABLES` | – | – | First variable-definition mapping. |
+| `variable_defs_2` | `MUSTACHE_VARIABLES` | – | – | Second variable-definition mapping. |
 | `conflict_mode` | enum | `keep_first` | `keep_first/keep_second/merge_values` | Conflict policy for duplicate variable names. |
 
 ##### Conflict Modes
 
 | Mode | Effect |
 |------|------|
-| `keep_first` | Preserve the value list from `variables_1` and ignore the conflicting definition from `variables_2`. |
-| `keep_second` | Overwrite the conflicting definition from `variables_1` with the one from `variables_2`. |
-| `merge_values` | Append the candidate values from `variables_2` after the values from `variables_1`. |
+| `keep_first` | Preserve the value list from `variable_defs_1` and ignore the conflicting definition from `variable_defs_2`. |
+| `keep_second` | Overwrite the conflicting definition from `variable_defs_1` with the one from `variable_defs_2`. |
+| `merge_values` | Append the candidate values from `variable_defs_2` after the values from `variable_defs_1`. |
 
 ##### Notes
 
@@ -597,7 +604,7 @@ Expands a `MUSTACHE_VARIABLES` mapping into a `MUSTACHE_VARIABLE_LIST`, where ea
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `variables` | `MUSTACHE_VARIABLES` | – | – | Variable mapping to expand into concrete per-prompt settings. |
+| `variable_defs` | `MUSTACHE_VARIABLES` | – | – | Variable-definition mapping to expand into concrete per-prompt settings. |
 | `sampling_mode` | enum | `sequential` | `sequential/random` | `sequential` walks the Cartesian product in stable order. `random` randomizes key order, value order, and sampled permutation order before emitting concrete settings. |
 | `seed` | `INT` | `0` | `0..2^64-1` | 64-bit seed used when `sampling_mode = random`. The same seed yields the same concrete variable-setting order. |
 | `limit` | `INT` | `-1` | `-1..2147483647` | Maximum number of concrete variable settings to emit. `-1` means no limit. |
@@ -627,7 +634,7 @@ Renders a template string containing mustache placeholders like `{{haircolor}}` 
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `variables` | `MUSTACHE_VARIABLE_LIST` | – | – | Concrete variable settings generated by `Mustache Variable Sampler`. One output prompt is rendered for each list entry. |
+| `variable_sets` | `MUSTACHE_VARIABLE_LIST` | – | – | Concrete variable settings generated by `Mustache Variable Sampler`. One output prompt is rendered for each list entry. |
 | `template` | `STRING` | `"The man has {{haircolor}} hair and {{leglength}} legs."` | multiline | Template text to render. Every referenced placeholder must exist in each `MUSTACHE_VARIABLE_LIST` entry. Repeated placeholders reuse the same selected value within a given entry. |
 
 ##### How permutation expansion works
@@ -672,14 +679,14 @@ Consumes a list-valued `STRING` input and joins every item into one string so pr
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `text` | `STRING` list | – | – | List-valued string input, such as the output of `Mustache Template`. |
+| `text_items` | `STRING` list | – | – | List-valued string input, such as the output of `Mustache Template`. |
 | `separator` | `STRING` | `\n` | multiline | Text inserted between each item. Escape sequences like `\n`, `\r`, and `\t` are decoded, so values like `\n===\n` produce visible section breaks. |
 
 ##### Outputs
 
 | Output | Type | Description |
 |------|------|-------------|
-| `text` | `STRING` | All list items joined with the requested separator. |
+| `joined_text` | `STRING` | All list items joined with the requested separator. |
 | `count` | `INT` | Number of input strings that were joined. |
 
 ##### Notes
@@ -705,14 +712,14 @@ Merges two `MUSTACHE_VARIABLE_LIST` inputs entry-by-entry so each output entry c
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `items_1` | `MUSTACHE_VARIABLE_LIST` | – | – | First variable-setting list. |
-| `items_2` | `MUSTACHE_VARIABLE_LIST` | – | – | Second variable-setting list. Keys from this side overwrite duplicate keys from `items_1`. |
+| `variable_sets_1` | `MUSTACHE_VARIABLE_LIST` | – | – | First variable-setting list. |
+| `variable_sets_2` | `MUSTACHE_VARIABLE_LIST` | – | – | Second variable-setting list. Keys from this side overwrite duplicate keys from `variable_sets_1`. |
 
 ##### Outputs
 
 | Output | Type | Description |
 |------|------|-------------|
-| `items` | `MUSTACHE_VARIABLE_LIST` | Entry-by-entry merged variable-setting list. |
+| `variable_sets` | `MUSTACHE_VARIABLE_LIST` | Entry-by-entry merged variable-setting list. |
 
 ##### Notes
 
@@ -734,7 +741,7 @@ Reorders a list-valued input without changing the item type. This is a generic u
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `items` | list | – | – | List-valued input to reorder. |
+| `list_items` | list | – | – | List-valued input to reorder. |
 | `mode` | enum | `shuffle` | `shuffle/reverse` | `shuffle` applies a seeded random permutation. `reverse` flips the list order. |
 | `seed` | `INT` | `0` | `0..2^64-1` | 64-bit seed used when `mode = shuffle`. The same seed yields the same permutation. |
 
@@ -742,7 +749,7 @@ Reorders a list-valued input without changing the item type. This is a generic u
 
 | Output | Type | Description |
 |------|------|-------------|
-| `items` | list | Reordered list of the same item type as the input. |
+| `list_items` | list | Reordered list of the same item type as the input. |
 
 ##### Notes
 
@@ -762,14 +769,14 @@ Concatenates two list-valued inputs into one list without changing the item type
 
 | Field | Type | Default | Range/Options | Notes |
 |------|------|---------|--------------|------|
-| `items_1` | list | – | – | First list-valued input. |
-| `items_2` | list | – | – | Second list-valued input, appended after `items_1`. |
+| `list_items_1` | list | – | – | First list-valued input. |
+| `list_items_2` | list | – | – | Second list-valued input, appended after `list_items_1`. |
 
 ##### Outputs
 
 | Output | Type | Description |
 |------|------|-------------|
-| `items` | list | Concatenation of `items_1` followed by `items_2`. |
+| `list_items` | list | Concatenation of `list_items_1` followed by `list_items_2`. |
 
 ##### Notes
 

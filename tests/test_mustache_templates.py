@@ -738,6 +738,66 @@ def test_render_mustache_template_list_raises_for_missing_variable():
         )
 
 
+def test_mustache_template_node_ports_use_type_revealing_names():
+    assert MustacheVariables.RETURN_NAMES == ("variable_defs",)
+    assert tuple(MustacheVariables.INPUT_TYPES()["required"]) == ("yaml_text",)
+    assert tuple(MustacheVariables.INPUT_TYPES()["optional"]) == ("variable_sets",)
+
+    assert MustacheVariable.RETURN_NAMES == ("variable_defs",)
+    assert tuple(MustacheVariable.INPUT_TYPES()["required"]) == ("variable_name", "variable_values")
+
+    assert MergeMustacheVariables.RETURN_NAMES == ("variable_defs",)
+    assert tuple(MergeMustacheVariables.INPUT_TYPES()["required"]) == (
+        "variable_defs_1",
+        "variable_defs_2",
+        "conflict_mode",
+    )
+
+    assert MustacheVariableSampler.RETURN_NAMES == ("variable_sets",)
+    assert tuple(MustacheVariableSampler.INPUT_TYPES()["required"]) == (
+        "variable_defs",
+        "sampling_mode",
+        "seed",
+        "limit",
+    )
+
+    assert MustacheTemplate.RETURN_NAMES == ("rendered_text",)
+    assert tuple(MustacheTemplate.INPUT_TYPES()["required"]) == ("variable_sets", "template")
+
+    assert JoinTextList.RETURN_NAMES == ("joined_text", "count")
+    assert tuple(JoinTextList.INPUT_TYPES()["required"]) == ("text_items", "separator")
+
+    assert MergeMustacheVariableLists.RETURN_NAMES == ("variable_sets",)
+    assert tuple(MergeMustacheVariableLists.INPUT_TYPES()["required"]) == ("variable_sets_1", "variable_sets_2")
+
+    assert ReorderList.RETURN_NAMES == ("list_items",)
+    assert tuple(ReorderList.INPUT_TYPES()["required"]) == ("list_items", "mode", "seed")
+
+    assert ConcatenateLists.RETURN_NAMES == ("list_items",)
+    assert tuple(ConcatenateLists.INPUT_TYPES()["required"]) == ("list_items_1", "list_items_2")
+
+
+def test_mustache_template_nodes_accept_renamed_keyword_inputs():
+    (variable_defs,) = MustacheVariable().build(variable_name="animal", variable_values=["fox", "wolf"])
+    (sampled_sets,) = MustacheVariableSampler().sample(
+        variable_defs=variable_defs,
+        sampling_mode="sequential",
+        seed=0,
+        limit=-1,
+    )
+    (rendered_text,) = MustacheTemplate().render(
+        variable_sets=sampled_sets,
+        template="{{animal}}",
+    )
+    joined_text, count = JoinTextList().join_text(
+        text_items=rendered_text,
+        separator=", ",
+    )
+
+    assert joined_text == "fox, wolf"
+    assert count == 2
+
+
 def test_mustache_variables_node_returns_typed_mapping():
     node = MustacheVariables()
 
@@ -988,7 +1048,7 @@ def test_mustache_variable_node_accepts_list_valued_string_input():
 def test_mustache_variable_node_rejects_multi_item_key_input():
     node = MustacheVariable()
 
-    with pytest.raises(ValueError, match="key input must resolve to a single value"):
+    with pytest.raises(ValueError, match="variable name input must resolve to a single value"):
         node.build(["animal", "lens"], "fox")
 
 
