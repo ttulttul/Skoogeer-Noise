@@ -157,6 +157,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Merge Mustache Variable Sets](#merge-mustache-variable-sets) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Concatenate Lists](#concatenate-lists) | `utils/list` | list |
 | [Reorder List](#reorder-list) | `utils/list` | list |
+| [List Slice](#list-slice) | `utils/list` | list |
 | [Latent to Image Batch](#latent-to-image-batch) | `latent/debug` | `IMAGE` |
 | [Image Batch to Latent](#image-batch-to-latent) | `latent/debug` | `LATENT` |
 | [ImageToBatch](#imagetobatch) | `image/batch` | `IMAGE` |
@@ -815,6 +816,34 @@ Concatenates two list-valued inputs into one list without changing the item type
 - This node is generic and works with `MUSTACHE_VARIABLE_LIST`, `STRING` lists, and other list-valued sockets.
 - For the mustache workflow, the list-valued node is `Mustache Variable Sampler`; `Mustache Variables` itself still returns a `MUSTACHE_VARIABLES` mapping.
 - For mustache workflows, use `Merge Mustache Variable Sets` instead when a downstream template needs each output entry to include keys from both input branches.
+
+---
+
+#### List Slice
+
+Extracts a contiguous slice from a list-valued input without changing the item type.
+
+- **Menu category:** `utils/list`
+- **Returns:** list of the same item type
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `list_items` | list | – | – | List-valued input to slice. Non-list inputs are copied through unchanged. |
+| `start_index` | `INT` | `1` | `1..2147483647` | 1-based starting item. Values past the list end clamp to the last item. |
+| `length` | `INT` | `1` | `1..2147483647` | Maximum number of items to include. Values past the list end truncate to available items. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `list_items` | list | The selected contiguous slice, or the original value when the input is not a list. |
+
+##### Notes
+
+- `start_index` and `length` must both be `1` or greater.
+- Empty list inputs return an empty list.
 
 ---
 

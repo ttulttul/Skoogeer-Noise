@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.mustache_templates import (  # noqa: E402
     ConcatenateLists,
     JoinTextList,
+    ListSlice,
     MergeMustacheVariableDefs,
     MergeMustacheVariableSets,
     MustacheVariable,
@@ -777,6 +778,9 @@ def test_mustache_template_node_ports_use_type_revealing_names():
     assert ReorderList.RETURN_NAMES == ("list_items",)
     assert tuple(ReorderList.INPUT_TYPES()["required"]) == ("list_items", "mode", "seed")
 
+    assert ListSlice.RETURN_NAMES == ("list_items",)
+    assert tuple(ListSlice.INPUT_TYPES()["required"]) == ("list_items", "start_index", "length")
+
     assert ConcatenateLists.RETURN_NAMES == ("list_items",)
     assert tuple(ConcatenateLists.INPUT_TYPES()["required"]) == ("list_items_1", "list_items_2")
 
@@ -1242,6 +1246,58 @@ def test_reorder_list_shuffle_is_deterministic_for_seed():
     assert first == second
     assert sorted(first) == [1, 2, 3, 4]
     assert first != third
+
+
+def test_list_slice_uses_one_based_start_and_length():
+    node = ListSlice()
+
+    (items,) = node.slice(["alpha", "beta", "gamma", "delta"], [2], [2])
+
+    assert node.INPUT_IS_LIST is True
+    assert node.OUTPUT_IS_LIST == (True,)
+    assert items == ["beta", "gamma"]
+
+
+def test_list_slice_truncates_length_past_list_end():
+    node = ListSlice()
+
+    (items,) = node.slice(["alpha", "beta", "gamma"], [2], [10])
+
+    assert items == ["beta", "gamma"]
+
+
+def test_list_slice_clamps_start_past_list_end_to_last_item():
+    node = ListSlice()
+
+    (items,) = node.slice(["alpha", "beta", "gamma"], [99], [2])
+
+    assert items == ["gamma"]
+
+
+def test_list_slice_returns_empty_list_for_empty_input_list():
+    node = ListSlice()
+
+    (items,) = node.slice([], [1], [3])
+
+    assert items == []
+
+
+def test_list_slice_copies_non_list_input_through_unchanged():
+    node = ListSlice()
+
+    (items,) = node.slice("alpha", [1], [2])
+
+    assert items == "alpha"
+
+
+def test_list_slice_rejects_invalid_start_or_length():
+    node = ListSlice()
+
+    with pytest.raises(ValueError, match="start_index must be 1 or greater"):
+        node.slice(["alpha"], [0], [1])
+
+    with pytest.raises(ValueError, match="length must be 1 or greater"):
+        node.slice(["alpha"], [1], [0])
 
 
 def test_concatenate_lists_joins_mustache_variable_list_batches():

@@ -1839,6 +1839,67 @@ class ReorderList:
         return (reordered,)
 
 
+class ListSlice:
+    CATEGORY = "utils/list"
+    RETURN_TYPES = ("*",)
+    RETURN_NAMES = ("list_items",)
+    INPUT_IS_LIST = True
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "slice"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "list_items": ("*", {
+                    "tooltip": "List-valued input to slice. Non-list inputs are copied through unchanged.",
+                }),
+                "start_index": ("INT", {
+                    "default": 1,
+                    "min": 1,
+                    "max": 2147483647,
+                    "tooltip": "1-based starting item to include. Values past the list end clamp to the last item.",
+                }),
+                "length": ("INT", {
+                    "default": 1,
+                    "min": 1,
+                    "max": 2147483647,
+                    "tooltip": "Maximum number of items to include from the start index.",
+                }),
+            },
+        }
+
+    def slice(self, list_items, start_index, length):
+        start_value = int(_unwrap_singleton_list(start_index))
+        length_value = int(_unwrap_singleton_list(length))
+
+        if start_value < 1:
+            raise ValueError("List Slice start_index must be 1 or greater.")
+        if length_value < 1:
+            raise ValueError("List Slice length must be 1 or greater.")
+
+        if not isinstance(list_items, list):
+            logger.warning(
+                "ListSlice node received non-list input of type %s; copying it through unchanged.",
+                type(list_items).__name__,
+            )
+            return (list_items,)
+
+        if not list_items:
+            logger.debug("ListSlice node received an empty list; returning an empty list.")
+            return ([],)
+
+        start_offset = min(start_value - 1, len(list_items) - 1)
+        sliced = list_items[start_offset:start_offset + length_value]
+        logger.debug(
+            "ListSlice node sliced %d items from list of %d starting at 1-based index %d.",
+            len(sliced),
+            len(list_items),
+            start_value,
+        )
+        return (sliced,)
+
+
 class ConcatenateLists:
     CATEGORY = "utils/list"
     RETURN_TYPES = ("*",)
@@ -1897,6 +1958,7 @@ class MergeMustacheVariableSets:
 NODE_CLASS_MAPPINGS = {
     "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
+    "ListSlice": ListSlice,
     "MergeMustacheVariableDefs": MergeMustacheVariableDefs,
     "MergeMustacheVariableSets": MergeMustacheVariableSets,
     "MustacheVariable": MustacheVariable,
@@ -1910,6 +1972,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
+    "ListSlice": "List Slice",
     "MergeMustacheVariableDefs": "Merge Mustache Variable Defs",
     "MergeMustacheVariableSets": "Merge Mustache Variable Sets",
     "MustacheVariable": "Mustache Variable",
