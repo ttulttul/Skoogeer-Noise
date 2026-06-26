@@ -6,8 +6,9 @@ import logging
 import random
 import re
 from bisect import bisect_left
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 
+import torch
 import yaml
 from yaml.nodes import MappingNode, ScalarNode, SequenceNode
 
@@ -36,6 +37,8 @@ _SAMPLING_METHODS = ("sequential", "random")
 _MUSTACHE_VARIABLE_CONFLICT_MODES = ("keep_first", "keep_second", "merge_values")
 _REORDER_MODES = ("shuffle", "reverse")
 _MAX_UNBOUNDED_VARIABLE_SETTINGS = 100_000
+_MARKDOWN_MAX_DEPTH = 4
+_MARKDOWN_MAX_ITEMS = 12
 _YAML_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _VARIABLE_WEIGHTS_KEY = "__mustache_weights__"
 _VARIABLE_TEMPLATE_SPECS_KEY = "__mustache_template_specs__"
@@ -1149,6 +1152,150 @@ def _unwrap_singleton_list(value):
     return value
 
 
+def _format_markdown_scalar(value: Any) -> str:
+    if isinstance(value, str):
+        return repr(value if len(value) <= 200 else value[:197] + "...")
+    if value is None or isinstance(value, (bool, int, float)):
+        return repr(value)
+    return repr(value)
+
+
+def _format_tensor_stats(tensor: torch.Tensor) -> List[str]:
+    lines = [
+        "- **Type:** `torch.Tensor`",
+        f"- **Shape:** `{tuple(int(dim) for dim in tensor.shape)}`",
+        f"- **Dtype:** `{tensor.dtype}`",
+        f"- **Device:** `{tensor.device}`",
+        f"- **Elements:** `{int(tensor.numel())}`",
+    ]
+
+    if tensor.numel() == 0:
+        lines.append("- **Stats:** empty tensor")
+        return lines
+
+    detached = tensor.detach()
+    stats_tensor = detached.abs() if torch.is_complex(detached) else detached
+    stats_tensor = stats_tensor.to(dtype=torch.float32)
+    finite_mask = torch.isfinite(stats_tensor)
+    finite_values = stats_tensor[finite_mask]
+    if finite_values.numel() == 0:
+        lines.append("- **Stats:** no finite values")
+        return lines
+
+    std_value = 0.0 if finite_values.numel() == 1 else float(finite_values.std(unbiased=False).item())
+    lines.extend([
+        f"- **Minimum:** `{float(finite_values.min().item()):.6g}`",
+        f"- **Maximum:** `{float(finite_values.max().item()):.6g}`",
+        f"- **Mean:** `{float(finite_values.mean().item()):.6g}`",
+        f"- **Std Dev:** `{std_value:.6g}`",
+    ])
+    if finite_values.numel() != stats_tensor.numel():
+        lines.append(f"- **Finite Values:** `{int(finite_values.numel())}/{int(stats_tensor.numel())}`")
+    return lines
+
+
+def _detect_comfy_type(value: Any) -> str | None:
+    if isinstance(value, dict) and isinstance(value.get("samples"), torch.Tensor):
+        return "ComfyUI LATENT"
+    if isinstance(value, torch.Tensor):
+        if value.ndim == 4 and int(value.shape[-1]) in (1, 3, 4):
+            return "ComfyUI IMAGE"
+        return "torch.Tensor"
+    if isinstance(value, list) and value and all(
+        isinstance(item, (list, tuple))
+        and len(item) == 2
+        and isinstance(item[0], torch.Tensor)
+        and isinstance(item[1], dict)
+        for item in value
+    ):
+        return "ComfyUI CONDITIONING"
+    return None
+
+
+def _markdown_heading(level: int, title: str) -> str:
+    return f"{'#' * max(1, min(level, 6))} {title}"
+
+
+def _format_value_markdown(value: Any, *, title: str = "Input", level: int = 1, depth: int = 0) -> List[str]:
+    comfy_type = _detect_comfy_type(value)
+    python_type = type(value).__name__
+    lines = [_markdown_heading(level, title)]
+
+    if comfy_type is not None:
+        lines.append(f"- **Detected Type:** `{comfy_type}`")
+    lines.append(f"- **Python Type:** `{python_type}`")
+
+    if isinstance(value, torch.Tensor):
+        lines.extend(_format_tensor_stats(value))
+        return lines
+
+    if isinstance(value, dict):
+        lines.append(f"- **Length:** `{len(value)}`")
+        if isinstance(value.get("samples"), torch.Tensor):
+            lines.append("")
+            lines.extend(_format_value_markdown(value["samples"], title="samples", level=level + 1, depth=depth + 1))
+            for key in sorted(key for key in value if key != "samples"):
+                item = value[key]
+                lines.append("")
+                if isinstance(item, torch.Tensor):
+                    lines.extend(_format_value_markdown(item, title=str(key), level=level + 1, depth=depth + 1))
+                else:
+                    lines.append(f"- **{key}:** `{type(item).__name__}` = `{_format_markdown_scalar(item)}`")
+            return lines
+
+        if depth >= _MARKDOWN_MAX_DEPTH:
+            lines.append("- **Contents:** depth limit reached")
+            return lines
+
+        lines.append("")
+        lines.append("| Key | Type | Value |")
+        lines.append("|---|---|---|")
+        for index, (key, item) in enumerate(value.items()):
+            if index >= _MARKDOWN_MAX_ITEMS:
+                lines.append(f"| ... | ... | {len(value) - _MARKDOWN_MAX_ITEMS} more item(s) |")
+                break
+            item_type = _detect_comfy_type(item) or type(item).__name__
+            item_value = "tensor summary below" if isinstance(item, torch.Tensor) else _format_markdown_scalar(item)
+            lines.append(f"| `{key}` | `{item_type}` | `{item_value}` |")
+        return lines
+
+    if isinstance(value, (list, tuple)):
+        lines.append(f"- **Length:** `{len(value)}`")
+        if depth >= _MARKDOWN_MAX_DEPTH:
+            lines.append("- **Contents:** depth limit reached")
+            return lines
+
+        lines.append("")
+        lines.append("| Index | Type | Summary |")
+        lines.append("|---:|---|---|")
+        for index, item in enumerate(value[:_MARKDOWN_MAX_ITEMS]):
+            item_type = _detect_comfy_type(item) or type(item).__name__
+            if isinstance(item, torch.Tensor):
+                summary = f"shape `{tuple(int(dim) for dim in item.shape)}`, dtype `{item.dtype}`"
+            elif isinstance(item, dict):
+                summary = f"{len(item)} key(s): {', '.join(str(key) for key in list(item)[:5])}"
+            elif isinstance(item, (list, tuple)):
+                summary = f"{len(item)} item(s)"
+            else:
+                summary = _format_markdown_scalar(item)
+            lines.append(f"| {index} | `{item_type}` | `{summary}` |")
+        if len(value) > _MARKDOWN_MAX_ITEMS:
+            lines.append(f"| ... | ... | {len(value) - _MARKDOWN_MAX_ITEMS} more item(s) |")
+
+        for index, item in enumerate(value[:_MARKDOWN_MAX_ITEMS]):
+            if isinstance(item, (torch.Tensor, dict, list, tuple)):
+                lines.append("")
+                lines.extend(_format_value_markdown(item, title=f"Item {index}", level=level + 1, depth=depth + 1))
+        return lines
+
+    lines.append(f"- **Value:** `{_format_markdown_scalar(value)}`")
+    return lines
+
+
+def anything_to_markdown(value: Any) -> str:
+    return "\n".join(_format_value_markdown(value))
+
+
 def _selection_indices_for_index(
     value_sets: Sequence[Sequence[str]],
     permutation_index: int,
@@ -1791,6 +1938,36 @@ class JoinTextList:
         return (joined, count)
 
 
+class AnythingToMarkdown:
+    CATEGORY = "text/debug"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("markdown",)
+    INPUT_IS_LIST = True
+    FUNCTION = "format"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "anything": ("*", {
+                    "tooltip": (
+                        "Any ComfyUI or Python value to summarize as Markdown. Tensors are summarized by shape "
+                        "and statistics rather than raw contents."
+                    ),
+                }),
+            },
+        }
+
+    def format(self, anything):
+        markdown = anything_to_markdown(anything)
+        logger.debug(
+            "AnythingToMarkdown formatted %s input into %d markdown characters.",
+            type(anything).__name__,
+            len(markdown),
+        )
+        return (markdown,)
+
+
 class ReorderList:
     CATEGORY = "utils/list"
     RETURN_TYPES = ("*",)
@@ -1956,6 +2133,7 @@ class MergeMustacheVariableSets:
 
 
 NODE_CLASS_MAPPINGS = {
+    "AnythingToMarkdown": AnythingToMarkdown,
     "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
     "ListSlice": ListSlice,
@@ -1970,6 +2148,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "AnythingToMarkdown": "AnythingToMarkdown",
     "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
     "ListSlice": "List Slice",

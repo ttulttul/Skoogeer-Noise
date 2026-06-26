@@ -154,6 +154,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
 | [Join Text List](#join-text-list) | `text/debug` | `STRING`, `INT` |
+| [AnythingToMarkdown](#anythingtomarkdown) | `text/debug` | `STRING` |
 | [Merge Mustache Variable Sets](#merge-mustache-variable-sets) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Concatenate Lists](#concatenate-lists) | `utils/list` | list |
 | [Reorder List](#reorder-list) | `utils/list` | list |
@@ -731,6 +732,33 @@ Consumes a list-valued `STRING` input and joins every item into one string so pr
 ```text
 Mustache Template -> Join Text List -> Preview as Text
 ```
+
+---
+
+#### AnythingToMarkdown
+
+Formats any connected value as a readable Markdown summary. It detects common ComfyUI-native structures such as `LATENT`, `IMAGE`, and `CONDITIONING`, and also reports regular Python container and scalar types.
+
+- **Menu category:** `text/debug`
+- **Returns:** `STRING`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `anything` | any | – | – | Value to inspect. Lists are inspected item-by-item. |
+
+##### Outputs
+
+| Output | Type | Description |
+|------|------|-------------|
+| `markdown` | `STRING` | Markdown text describing the detected type and contents. |
+
+##### Notes
+
+- Tensors are summarized by shape, dtype, device, element count, min, max, mean, and standard deviation.
+- Tensor contents are not dumped into the output.
+- Container summaries are bounded so large inputs remain previewable.
 
 ---
 

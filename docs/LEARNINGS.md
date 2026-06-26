@@ -1,5 +1,6 @@
 # Learnings
 
+- Textual inspection nodes should detect ComfyUI wrapper types but avoid dumping raw tensor values; shape, dtype, device, element count, and finite-value stats give enough debugging signal without flooding previews.
 - Generic list slicing nodes should fail safe only on non-list data inputs; invalid slice controls should still raise because `start_index` and `length` below `1` indicate a misconfigured workflow.
 - For batch edit nodes, replacement is the safer default than insertion because users often expect "put this at index N" to preserve batch length; insertion should be an explicit mode because it changes downstream batch cardinality.
 - Batch insertion nodes should splice along tensor dimension 0 and preserve the rest of the ComfyUI object untouched; for latents, `noise_mask` needs explicit batch alignment because a singleton mask may apply to multiple inserted samples.

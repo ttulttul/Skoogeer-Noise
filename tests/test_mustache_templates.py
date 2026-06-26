@@ -2,12 +2,14 @@ import pathlib
 import sys
 
 import pytest
+import torch
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.mustache_templates import (  # noqa: E402
+    AnythingToMarkdown,
     ConcatenateLists,
     JoinTextList,
     ListSlice,
@@ -772,6 +774,9 @@ def test_mustache_template_node_ports_use_type_revealing_names():
     assert JoinTextList.RETURN_NAMES == ("joined_text", "count")
     assert tuple(JoinTextList.INPUT_TYPES()["required"]) == ("text_items", "separator")
 
+    assert AnythingToMarkdown.RETURN_NAMES == ("markdown",)
+    assert tuple(AnythingToMarkdown.INPUT_TYPES()["required"]) == ("anything",)
+
     assert MergeMustacheVariableSets.RETURN_NAMES == ("variable_sets",)
     assert tuple(MergeMustacheVariableSets.INPUT_TYPES()["required"]) == ("variable_sets_1", "variable_sets_2")
 
@@ -1220,6 +1225,85 @@ def test_join_text_list_unwraps_singleton_list_separator_values():
 
     assert joined == "text entry 1\n===\ntext entry 2"
     assert count == 2
+
+
+def test_anything_to_markdown_formats_scalar_values():
+    node = AnythingToMarkdown()
+
+    (markdown,) = node.format("hello")
+
+    assert node.INPUT_IS_LIST is True
+    assert markdown == "# Input\n- **Python Type:** `str`\n- **Value:** `'hello'`"
+
+
+def test_anything_to_markdown_summarizes_python_lists_and_item_types():
+    node = AnythingToMarkdown()
+
+    (markdown,) = node.format(["alpha", 3, {"enabled": True}])
+
+    assert "| 0 | `str` | `'alpha'` |" in markdown
+    assert "| 1 | `int` | `3` |" in markdown
+    assert "| 2 | `dict` | `1 key(s): enabled` |" in markdown
+    assert "## Item 2" in markdown
+    assert "| `enabled` | `bool` | `True` |" in markdown
+
+
+def test_anything_to_markdown_summarizes_tensor_shape_and_stats():
+    node = AnythingToMarkdown()
+    tensor = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)
+
+    (markdown,) = node.format(tensor)
+
+    assert "- **Detected Type:** `torch.Tensor`" in markdown
+    assert "- **Shape:** `(2, 2)`" in markdown
+    assert "- **Dtype:** `torch.float32`" in markdown
+    assert "- **Minimum:** `1`" in markdown
+    assert "- **Maximum:** `4`" in markdown
+    assert "- **Mean:** `2.5`" in markdown
+    assert "- **Std Dev:** `1.11803`" in markdown
+    assert "tensor([[1." not in markdown
+
+
+def test_anything_to_markdown_detects_comfy_image_tensor():
+    node = AnythingToMarkdown()
+    image = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
+
+    (markdown,) = node.format(image)
+
+    assert "- **Detected Type:** `ComfyUI IMAGE`" in markdown
+    assert "- **Shape:** `(1, 8, 8, 3)`" in markdown
+
+
+def test_anything_to_markdown_detects_comfy_latent_dict():
+    node = AnythingToMarkdown()
+    latent = {
+        "samples": torch.ones((1, 4, 8, 8), dtype=torch.float32),
+        "noise_mask": torch.zeros((1, 8, 8), dtype=torch.float32),
+        "batch_index": [2],
+    }
+
+    (markdown,) = node.format(latent)
+
+    assert "- **Detected Type:** `ComfyUI LATENT`" in markdown
+    assert "## samples" in markdown
+    assert "- **Shape:** `(1, 4, 8, 8)`" in markdown
+    assert "## noise_mask" in markdown
+    assert "- **batch_index:** `list` = `[2]`" in markdown
+
+
+def test_anything_to_markdown_detects_conditioning_lists():
+    node = AnythingToMarkdown()
+    conditioning = [
+        [torch.ones((77, 768), dtype=torch.float32), {"pooled_output": torch.zeros((768,), dtype=torch.float32)}],
+        [torch.zeros((77, 768), dtype=torch.float32), {}],
+    ]
+
+    (markdown,) = node.format(conditioning)
+
+    assert "- **Detected Type:** `ComfyUI CONDITIONING`" in markdown
+    assert "| 0 | `list` | `2 item(s)` |" in markdown
+    assert "## Item 0" in markdown
+    assert "shape `(77, 768)`, dtype `torch.float32`" in markdown
 
 
 def test_reorder_list_reverse_returns_reversed_items():
