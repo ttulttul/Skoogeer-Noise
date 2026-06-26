@@ -1,5 +1,6 @@
 # Learnings
 
+- A debug node that consumes a mapped list and emits one text document should use `INPUT_IS_LIST = True` plus `OUTPUT_IS_LIST = (True,)` and return `[markdown]`; otherwise ComfyUI can wrap the scalar string column and text preview nodes will display a raw Python list.
 - ComfyUI's `Preview as Text` JSON-stringifies list-shaped values, so formatter/debug nodes that should be read directly need to return a `ui.text` payload in addition to their normal result.
 - Textual inspection nodes should detect ComfyUI wrapper types but avoid dumping raw tensor values; shape, dtype, device, element count, and finite-value stats give enough debugging signal without flooding previews.
 - Generic list slicing nodes should fail safe only on non-list data inputs; invalid slice controls should still raise because `start_index` and `length` below `1` indicate a misconfigured workflow.

@@ -31,9 +31,38 @@ from src.mustache_templates import (  # noqa: E402
 
 def _markdown_result(node_result):
     assert set(node_result) == {"ui", "result"}
-    markdown = node_result["result"][0]
+    markdown = node_result["result"][0][0]
     assert node_result["ui"]["text"] == (markdown,)
     return markdown
+
+
+def _simulate_comfy_mapped_outputs(node, input_data_all):
+    input_is_list = getattr(node, "INPUT_IS_LIST", False)
+    max_len_input = max(len(values) for values in input_data_all.values())
+
+    if input_is_list:
+        results = [node.format(**input_data_all)]
+    else:
+        results = []
+        for index in range(max_len_input):
+            inputs = {
+                key: values[index if len(values) > index else -1]
+                for key, values in input_data_all.items()
+            }
+            results.append(node.format(**inputs))
+
+    output_is_list = getattr(node, "OUTPUT_IS_LIST", [False] * len(results[0]["result"]))
+    outputs = []
+    for output_index, is_list in enumerate(output_is_list):
+        if is_list:
+            merged = []
+            for result in results:
+                merged.extend(result["result"][output_index])
+            outputs.append(merged)
+        else:
+            outputs.append([result["result"][output_index] for result in results])
+    ui = {"text": [text for result in results for text in result["ui"]["text"]]}
+    return outputs, ui
 
 
 def test_parse_mustache_variables_yaml_parses_lists():
@@ -782,8 +811,9 @@ def test_mustache_template_node_ports_use_type_revealing_names():
     assert tuple(JoinTextList.INPUT_TYPES()["required"]) == ("text_items", "separator")
 
     assert AnythingToMarkdown.RETURN_NAMES == ("markdown",)
-    assert AnythingToMarkdown.INPUT_IS_LIST == (True,)
+    assert AnythingToMarkdown.INPUT_IS_LIST is True
     assert AnythingToMarkdown.OUTPUT_NODE is True
+    assert AnythingToMarkdown.OUTPUT_IS_LIST == (True,)
     assert tuple(AnythingToMarkdown.INPUT_TYPES()["required"]) == ("anything",)
 
     assert MergeMustacheVariableSets.RETURN_NAMES == ("variable_sets",)
@@ -1322,6 +1352,23 @@ def test_anything_to_markdown_summarizes_tensors_inside_dicts():
     assert "| `attention_mask` | `torch.Tensor` | `tensor summary below` |" in markdown
     assert "## attention_mask" in markdown
     assert "- **Shape:** `(1, 4)`" in markdown
+
+
+def test_anything_to_markdown_collapses_comfy_mapped_inputs_to_one_markdown_output():
+    node = AnythingToMarkdown()
+    conditionings = [
+        [[torch.ones((1, 4), dtype=torch.float32), {"attention_mask": torch.ones((1, 4), dtype=torch.int64)}]],
+        [[torch.zeros((1, 4), dtype=torch.float32), {"attention_mask": torch.zeros((1, 4), dtype=torch.int64)}]],
+    ]
+
+    outputs, ui = _simulate_comfy_mapped_outputs(node, {"anything": conditionings})
+
+    assert len(outputs[0]) == 1
+    assert len(ui["text"]) == 1
+    assert outputs[0][0] == ui["text"][0]
+    assert "- **Length:** `2`" in outputs[0][0]
+    assert "## Item 0" in outputs[0][0]
+    assert "## Item 1" in outputs[0][0]
 
 
 def test_reorder_list_reverse_returns_reversed_items():

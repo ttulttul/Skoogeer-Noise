@@ -1948,8 +1948,9 @@ class AnythingToMarkdown:
     CATEGORY = "text/debug"
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("markdown",)
-    INPUT_IS_LIST = (True,)
+    INPUT_IS_LIST = True
     OUTPUT_NODE = True
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "format"
 
     @classmethod
@@ -1972,7 +1973,7 @@ class AnythingToMarkdown:
             type(anything).__name__,
             len(markdown),
         )
-        return {"ui": {"text": (markdown,)}, "result": (markdown,)}
+        return {"ui": {"text": (markdown,)}, "result": ([markdown],)}
 
 
 class ReorderList:
