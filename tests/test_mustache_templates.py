@@ -29,6 +29,13 @@ from src.mustache_templates import (  # noqa: E402
 )
 
 
+def _markdown_result(node_result):
+    assert set(node_result) == {"ui", "result"}
+    markdown = node_result["result"][0]
+    assert node_result["ui"]["text"] == (markdown,)
+    return markdown
+
+
 def test_parse_mustache_variables_yaml_parses_lists():
     variables = parse_mustache_variables_yaml(
         "haircolor:\n"
@@ -775,6 +782,8 @@ def test_mustache_template_node_ports_use_type_revealing_names():
     assert tuple(JoinTextList.INPUT_TYPES()["required"]) == ("text_items", "separator")
 
     assert AnythingToMarkdown.RETURN_NAMES == ("markdown",)
+    assert AnythingToMarkdown.INPUT_IS_LIST == (True,)
+    assert AnythingToMarkdown.OUTPUT_NODE is True
     assert tuple(AnythingToMarkdown.INPUT_TYPES()["required"]) == ("anything",)
 
     assert MergeMustacheVariableSets.RETURN_NAMES == ("variable_sets",)
@@ -1230,16 +1239,15 @@ def test_join_text_list_unwraps_singleton_list_separator_values():
 def test_anything_to_markdown_formats_scalar_values():
     node = AnythingToMarkdown()
 
-    (markdown,) = node.format("hello")
+    markdown = _markdown_result(node.format("hello"))
 
-    assert node.INPUT_IS_LIST is True
     assert markdown == "# Input\n- **Python Type:** `str`\n- **Value:** `'hello'`"
 
 
 def test_anything_to_markdown_summarizes_python_lists_and_item_types():
     node = AnythingToMarkdown()
 
-    (markdown,) = node.format(["alpha", 3, {"enabled": True}])
+    markdown = _markdown_result(node.format(["alpha", 3, {"enabled": True}]))
 
     assert "| 0 | `str` | `'alpha'` |" in markdown
     assert "| 1 | `int` | `3` |" in markdown
@@ -1252,7 +1260,7 @@ def test_anything_to_markdown_summarizes_tensor_shape_and_stats():
     node = AnythingToMarkdown()
     tensor = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)
 
-    (markdown,) = node.format(tensor)
+    markdown = _markdown_result(node.format(tensor))
 
     assert "- **Detected Type:** `torch.Tensor`" in markdown
     assert "- **Shape:** `(2, 2)`" in markdown
@@ -1268,7 +1276,7 @@ def test_anything_to_markdown_detects_comfy_image_tensor():
     node = AnythingToMarkdown()
     image = torch.zeros((1, 8, 8, 3), dtype=torch.float32)
 
-    (markdown,) = node.format(image)
+    markdown = _markdown_result(node.format(image))
 
     assert "- **Detected Type:** `ComfyUI IMAGE`" in markdown
     assert "- **Shape:** `(1, 8, 8, 3)`" in markdown
@@ -1282,7 +1290,7 @@ def test_anything_to_markdown_detects_comfy_latent_dict():
         "batch_index": [2],
     }
 
-    (markdown,) = node.format(latent)
+    markdown = _markdown_result(node.format(latent))
 
     assert "- **Detected Type:** `ComfyUI LATENT`" in markdown
     assert "## samples" in markdown
@@ -1298,12 +1306,22 @@ def test_anything_to_markdown_detects_conditioning_lists():
         [torch.zeros((77, 768), dtype=torch.float32), {}],
     ]
 
-    (markdown,) = node.format(conditioning)
+    markdown = _markdown_result(node.format(conditioning))
 
     assert "- **Detected Type:** `ComfyUI CONDITIONING`" in markdown
     assert "| 0 | `list` | `2 item(s)` |" in markdown
     assert "## Item 0" in markdown
-    assert "shape `(77, 768)`, dtype `torch.float32`" in markdown
+    assert "shape (77, 768), dtype torch.float32" in markdown
+
+
+def test_anything_to_markdown_summarizes_tensors_inside_dicts():
+    node = AnythingToMarkdown()
+
+    markdown = _markdown_result(node.format({"attention_mask": torch.ones((1, 4), dtype=torch.float32)}))
+
+    assert "| `attention_mask` | `torch.Tensor` | `tensor summary below` |" in markdown
+    assert "## attention_mask" in markdown
+    assert "- **Shape:** `(1, 4)`" in markdown
 
 
 def test_reorder_list_reverse_returns_reversed_items():

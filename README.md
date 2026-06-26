@@ -756,6 +756,7 @@ Formats any connected value as a readable Markdown summary. It detects common Co
 
 ##### Notes
 
+- The node publishes the same Markdown through its own ComfyUI text preview payload, so it can be used directly as an output node.
 - Tensors are summarized by shape, dtype, device, element count, min, max, mean, and standard deviation.
 - Tensor contents are not dumped into the output.
 - Container summaries are bounded so large inputs remain previewable.

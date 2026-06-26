@@ -1257,6 +1257,12 @@ def _format_value_markdown(value: Any, *, title: str = "Input", level: int = 1, 
             item_type = _detect_comfy_type(item) or type(item).__name__
             item_value = "tensor summary below" if isinstance(item, torch.Tensor) else _format_markdown_scalar(item)
             lines.append(f"| `{key}` | `{item_type}` | `{item_value}` |")
+        for index, (key, item) in enumerate(value.items()):
+            if index >= _MARKDOWN_MAX_ITEMS:
+                break
+            if isinstance(item, (torch.Tensor, dict, list, tuple)):
+                lines.append("")
+                lines.extend(_format_value_markdown(item, title=str(key), level=level + 1, depth=depth + 1))
         return lines
 
     if isinstance(value, (list, tuple)):
@@ -1271,7 +1277,7 @@ def _format_value_markdown(value: Any, *, title: str = "Input", level: int = 1, 
         for index, item in enumerate(value[:_MARKDOWN_MAX_ITEMS]):
             item_type = _detect_comfy_type(item) or type(item).__name__
             if isinstance(item, torch.Tensor):
-                summary = f"shape `{tuple(int(dim) for dim in item.shape)}`, dtype `{item.dtype}`"
+                summary = f"shape {tuple(int(dim) for dim in item.shape)}, dtype {item.dtype}"
             elif isinstance(item, dict):
                 summary = f"{len(item)} key(s): {', '.join(str(key) for key in list(item)[:5])}"
             elif isinstance(item, (list, tuple)):
@@ -1942,7 +1948,8 @@ class AnythingToMarkdown:
     CATEGORY = "text/debug"
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("markdown",)
-    INPUT_IS_LIST = True
+    INPUT_IS_LIST = (True,)
+    OUTPUT_NODE = True
     FUNCTION = "format"
 
     @classmethod
@@ -1965,7 +1972,7 @@ class AnythingToMarkdown:
             type(anything).__name__,
             len(markdown),
         )
-        return (markdown,)
+        return {"ui": {"text": (markdown,)}, "result": (markdown,)}
 
 
 class ReorderList:
