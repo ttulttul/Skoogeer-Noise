@@ -408,6 +408,33 @@ def _find_yaml_quoted_scalar_end(text: str) -> int | None:
     return None
 
 
+def _split_yaml_line_prefix(line: str) -> tuple[str | None, str | None]:
+    """Split a block list item or mapping line into its indicator prefix and its value text.
+
+    Spaces after "-" or ":" are valid YAML. They join the prefix when a quote follows them, so the
+    quoted value is still recognised as quoted. Otherwise they stay in the value, where notrim
+    renders can rely on them.
+    """
+    prefix = None
+    remainder = None
+    list_match = re.match(r"^(\s*-\s)(.*)$", line)
+    if list_match is not None:
+        prefix = list_match.group(1)
+        remainder = list_match.group(2)
+    else:
+        mapping_match = re.match(r"^(\s*[^:\n]+:\s)(.*)$", line)
+        if mapping_match is not None:
+            prefix = mapping_match.group(1)
+            remainder = mapping_match.group(2)
+
+    if prefix is not None and remainder is not None:
+        unpadded = remainder.lstrip(" \t")
+        if unpadded != remainder and unpadded.startswith(("'", '"')):
+            prefix += remainder[: len(remainder) - len(unpadded)]
+            remainder = unpadded
+    return prefix, remainder
+
+
 def _normalize_quoted_weight_suffix_remainder(remainder: str) -> str:
     if not remainder or remainder[0] not in {"'", '"'}:
         return remainder
@@ -435,17 +462,7 @@ def _normalize_quoted_weight_suffixes(yaml_text: str) -> str:
             normalized_lines.append(line)
             continue
 
-        prefix = None
-        remainder = None
-        list_match = re.match(r"^(\s*-\s)(.*)$", line)
-        if list_match is not None:
-            prefix = list_match.group(1)
-            remainder = list_match.group(2)
-        else:
-            mapping_match = re.match(r"^(\s*[^:\n]+:\s)(.*)$", line)
-            if mapping_match is not None:
-                prefix = mapping_match.group(1)
-                remainder = mapping_match.group(2)
+        prefix, remainder = _split_yaml_line_prefix(line)
 
         if prefix is None or remainder is None:
             normalized_lines.append(line)
@@ -471,17 +488,7 @@ def _quote_yaml_scalars(yaml_text: str, *, require_mustache: bool) -> str:
             quoted_lines.append(line)
             continue
 
-        prefix = None
-        remainder = None
-        list_match = re.match(r"^(\s*-\s)(.*)$", line)
-        if list_match is not None:
-            prefix = list_match.group(1)
-            remainder = list_match.group(2)
-        else:
-            mapping_match = re.match(r"^(\s*[^:\n]+:\s)(.*)$", line)
-            if mapping_match is not None:
-                prefix = mapping_match.group(1)
-                remainder = mapping_match.group(2)
+        prefix, remainder = _split_yaml_line_prefix(line)
 
         if prefix is None or remainder is None or remainder == "":
             quoted_lines.append(line)

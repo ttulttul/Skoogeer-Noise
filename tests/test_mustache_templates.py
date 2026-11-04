@@ -257,6 +257,33 @@ def test_parse_mustache_variables_yaml_accepts_quoted_weight_shorthand():
     assert weights == pytest.approx([0.2, 0.1, 0.7])
 
 
+def test_parse_mustache_variables_yaml_keeps_quotes_out_of_values_after_extra_spaces():
+    variables = parse_mustache_variables_yaml(
+        "scene:  'a {{place}} at dusk'\n"
+        "place:\n"
+        "  -   'quiet {{town}}'\n"
+        "town:\n"
+        "  -  \"fishing town\"\n"
+    )
+
+    assert variables["scene"] == ["a {{place}} at dusk"]
+    assert variables["place"] == ["quiet {{town}}"]
+    assert variables["town"] == ["fishing town"]
+
+
+def test_parse_mustache_variables_yaml_accepts_quoted_weights_after_extra_spaces():
+    variables = parse_mustache_variables_yaml(
+        "light:\n"
+        "  -  'soft {{tone}} glow':0.25\n"
+        "  -    'hard {{tone}} glare':0.75\n"
+        "tone:\n"
+        "  - blue\n"
+    )
+
+    assert variables["light"] == ["soft {{tone}} glow", "hard {{tone}} glare"]
+    assert variables["__mustache_weights__"]["light"] == pytest.approx([0.25, 0.75])
+
+
 def test_parse_mustache_variables_yaml_rejects_weight_total_above_one():
     with pytest.raises(ValueError, match="weights must not exceed 1.0"):
         parse_mustache_variables_yaml(
