@@ -13,6 +13,7 @@ from src.mustache_templates import (  # noqa: E402
     ConcatenateLists,
     JoinTextList,
     ListSlice,
+    LoadMustacheVariables,
     MergeMustacheVariableDefs,
     MergeMustacheVariableSets,
     MustacheVariable,
@@ -22,11 +23,13 @@ from src.mustache_templates import (  # noqa: E402
     MustacheVariables,
     ReorderList,
     extract_template_variables,
+    list_directory_for_browser,
     parse_mustache_variables_inputs,
     parse_mustache_variables_yaml,
     render_mustache_template_list,
     sample_mustache_variable_list,
 )
+from src.mustache_templates import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS  # noqa: E402
 
 
 def _markdown_result(node_result):
@@ -901,6 +904,84 @@ def test_mustache_variables_node_returns_typed_mapping():
 
     assert node.INPUT_IS_LIST is True
     assert variables == {"haircolor": ["brown", "blonde"]}
+
+
+def test_load_mustache_variables_node_matches_inline_yaml(tmp_path):
+    yaml_text = "haircolor:\n  - brown\n  - blonde\nlook:\n  - '{{haircolor}} hair'\n"
+    yaml_file = tmp_path / "vars.yaml"
+    yaml_file.write_text(yaml_text, encoding="utf-8")
+
+    (loaded,) = LoadMustacheVariables().load_variables(str(yaml_file))
+    (inline,) = MustacheVariables().parse_variables(yaml_text)
+
+    assert loaded == inline
+    assert NODE_DISPLAY_NAME_MAPPINGS["LoadMustacheVariables"] == "Load Mustache Variables"
+    assert NODE_CLASS_MAPPINGS["LoadMustacheVariables"] is LoadMustacheVariables
+
+
+def test_load_mustache_variables_node_strips_bom_and_expands_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "vars.yaml").write_bytes("\ufeffanimal:\n  - fox\n".encode("utf-8"))
+
+    (variables,) = LoadMustacheVariables().load_variables("~/vars.yaml")
+
+    assert variables == {"animal": ["fox"]}
+
+
+def test_load_mustache_variables_node_renders_with_variable_sets(tmp_path):
+    yaml_file = tmp_path / "vars.yaml"
+    yaml_file.write_text("subject:\n  - '{{animal}} in a hat'\n", encoding="utf-8")
+
+    (variables,) = LoadMustacheVariables().load_variables(
+        str(yaml_file), variable_sets=[{"animal": "fox"}, {"animal": "owl"}]
+    )
+
+    assert variables == {"subject": ["fox in a hat", "owl in a hat"]}
+
+
+def test_load_mustache_variables_node_reports_missing_or_blank_path(tmp_path):
+    node = LoadMustacheVariables()
+
+    with pytest.raises(FileNotFoundError, match="not found"):
+        node.load_variables(str(tmp_path / "missing.yaml"))
+    with pytest.raises(ValueError, match="file_path"):
+        node.load_variables("   ")
+
+
+def test_load_mustache_variables_is_changed_tracks_file_contents(tmp_path):
+    yaml_file = tmp_path / "vars.yaml"
+    yaml_file.write_text("animal:\n  - fox\n", encoding="utf-8")
+    first = LoadMustacheVariables.IS_CHANGED(str(yaml_file))
+    assert LoadMustacheVariables.IS_CHANGED(str(yaml_file)) == first
+
+    yaml_file.write_text("animal:\n  - owl\n", encoding="utf-8")
+    assert LoadMustacheVariables.IS_CHANGED(str(yaml_file)) != first
+
+    missing = LoadMustacheVariables.IS_CHANGED(str(tmp_path / "missing.yaml"))
+    assert missing != missing  # NaN forces ComfyUI to re-run and surface the error
+
+
+def test_list_directory_for_browser_sorts_dirs_first_and_hides_dotfiles(tmp_path):
+    (tmp_path / "b.yaml").write_text("", encoding="utf-8")
+    (tmp_path / "A.txt").write_text("", encoding="utf-8")
+    (tmp_path / "zdir").mkdir()
+    (tmp_path / ".hidden").write_text("", encoding="utf-8")
+
+    listing = list_directory_for_browser(str(tmp_path))
+
+    assert listing["path"] == str(tmp_path.resolve()) or listing["path"] == str(tmp_path)
+    assert listing["parent"] == str(pathlib.Path(listing["path"]).parent)
+    assert [entry["name"] for entry in listing["entries"]] == ["zdir", "A.txt", "b.yaml"]
+    assert listing["entries"][0]["is_dir"] is True
+
+    with_hidden = list_directory_for_browser(str(tmp_path), show_hidden=True)
+    assert ".hidden" in [entry["name"] for entry in with_hidden["entries"]]
+
+    from_file = list_directory_for_browser(str(tmp_path / "b.yaml"))
+    assert from_file["path"] == listing["path"]
+
+    with pytest.raises(FileNotFoundError):
+        list_directory_for_browser(str(tmp_path / "nope"))
 
 
 def test_mustache_variables_node_accepts_list_of_yaml_strings():
