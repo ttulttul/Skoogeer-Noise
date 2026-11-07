@@ -191,6 +191,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Unpatchify Flux.2 Latent](#unpatchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Patchify Flux.2 Latent](#patchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Models List](#models-list) | `model/batch` | `MODEL` list |
+| [Float Range](#float-range) | `utils/list` | `FLOAT` list, `INT` |
 | [Model (RotorQuant Attention)](#model-rotorquant-attention) | `model/patch` | `MODEL` |
 | [Model (TurboQuant Attention)](#model-turboquant-attention) | `model/patch` | `MODEL` |
 | [Conditioning (Add Noise)](#conditioning-add-noise) | `conditioning/noise` | `CONDITIONING` |
@@ -1666,6 +1667,33 @@ This mirrors the workflow role of ComfyUI's native `Batch Latents` and `Batch Ma
 
 - Feed the output into a normal `MODEL` input such as native `KSampler.model` to sample once per model while singleton inputs like seed, steps, conditioning, and latent are repeated.
 - ComfyUI's executor maps list outputs into non-list-aware downstream nodes, and native `KSampler` does not declare `INPUT_IS_LIST`, so each model object is passed to one sampler invocation.
+
+---
+
+#### Float Range
+
+Emits evenly spaced floats as a list-valued `FLOAT` output, like Python's `range` for floats.
+Connect it to any `FLOAT` input, such as `KSampler.denoise`, and ComfyUI runs that node once per value. You don't need a Start Loop / End Loop pair.
+
+- **Menu category:** `utils/list`
+- **Returns:** `values` (`FLOAT` list), `count` (`INT`)
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `start` | `FLOAT` | `0.0` | any finite value | First value. |
+| `stop` | `FLOAT` | `1.0` | any finite value | Value the list counts toward. The list never goes past it. |
+| `step` | `FLOAT` | `0.1` | non-zero | Spacing between values. Use a negative step to count down. |
+| `include_stop` | `BOOLEAN` | `true` | – | Include `stop` when a step lands exactly on it. |
+| `repeat_each` | `INT` | `1` | `1`–`10000`, optional | `[a, b]` becomes `[a, a, b, b]`. |
+| `repeat_list` | `INT` | `1` | `1`–`10000`, optional | `[a, b]` becomes `[a, b, a, b]`. |
+
+##### Notes
+
+- `0.3` to `0.9` with step `0.1` gives `[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]`. Values are rounded to 10 decimals, so there's no `0.30000000000000004`.
+- ComfyUI pairs list inputs by position and reuses the last item of a shorter list. It does not form every combination. To sweep 7 denoise values across the same 16 seeds, set `repeat_each` to 16 here (112 values), and give the seed input the 16 seeds repeated 7 times as a whole list.
+- The node raises an error for a zero step, a step pointing away from `stop`, non-finite bounds, or more than 10,000 values.
 
 ---
 

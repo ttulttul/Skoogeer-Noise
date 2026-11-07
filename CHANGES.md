@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.56 - 2026-11-07
+- Added `Float Range`, a list-valued `FLOAT` source (start, stop, step, `include_stop`) for sweeps such as a KSampler denoise sweep. It also outputs the item `count`.
+- `repeat_each` and `repeat_list` repeat each value or the whole list, so two list inputs can line up as a full grid even though ComfyUI pairs list inputs by position.
+- Values are rounded to 10 decimals so steps like 0.1 give clean values, and ranges over 10,000 items, zero steps, and steps that point away from `stop` raise errors.
+
 ## 1.2.52 - 2026-05-28
 - Added a `mode` control to `ImageToBatch` and `LatentToBatch`; `replace` is now the default behavior, while `insert` preserves the previous shift-right behavior.
 - Added regression coverage for replacement mode keeping batch size unchanged and for multi-item replacement bounds.
