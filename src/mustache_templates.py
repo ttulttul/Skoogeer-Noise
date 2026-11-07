@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import heapq
 import itertools
 import logging
+import os
 import random
 import re
 from bisect import bisect_left
@@ -1720,6 +1722,131 @@ class MustacheVariables:
         return (variables,)
 
 
+def resolve_mustache_variables_path(file_path) -> str:
+    text = str(_unwrap_single_input_value(file_path, input_name="file_path") or "").strip()
+    if not text:
+        raise ValueError("Load Mustache Variables needs a file_path; use the 'choose file' button or type a path.")
+    return os.path.abspath(os.path.expanduser(text))
+
+
+def load_mustache_variables_yaml_text(file_path) -> str:
+    path = resolve_mustache_variables_path(file_path)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Mustache variables file not found: {path}")
+    with open(path, "r", encoding="utf-8-sig") as handle:
+        yaml_text = handle.read()
+    logger.debug("Loaded %d characters of mustache variables YAML from %s.", len(yaml_text), path)
+    return yaml_text
+
+
+def list_directory_for_browser(path: str | None, *, show_hidden: bool = False) -> Dict[str, Any]:
+    """Describe one directory for the frontend path chooser.
+
+    A blank path starts at the user's home directory. A path that points at a file lists the file's
+    directory, so the chooser can reopen next to the currently selected file.
+    """
+    text = str(path or "").strip()
+    resolved = os.path.abspath(os.path.expanduser(text or "~"))
+    if os.path.isfile(resolved):
+        resolved = os.path.dirname(resolved)
+    if not os.path.isdir(resolved):
+        raise FileNotFoundError(f"Directory not found: {resolved}")
+
+    entries: List[Dict[str, Any]] = []
+    with os.scandir(resolved) as iterator:
+        for entry in iterator:
+            if not show_hidden and entry.name.startswith("."):
+                continue
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                continue
+            entries.append({"name": entry.name, "path": entry.path, "is_dir": is_dir})
+    entries.sort(key=lambda item: (not item["is_dir"], item["name"].lower()))
+
+    parent = os.path.dirname(resolved)
+    return {
+        "path": resolved,
+        "parent": parent if parent != resolved else None,
+        "separator": os.sep,
+        "entries": entries,
+    }
+
+
+class LoadMustacheVariables:
+    CATEGORY = "text/template"
+    RETURN_TYPES = ("MUSTACHE_VARIABLES",)
+    RETURN_NAMES = ("variable_defs",)
+    FUNCTION = "load_variables"
+
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Dict[str, tuple]]:
+        return {
+            "required": {
+                "file_path": ("STRING", {
+                    "default": "",
+                    "tooltip": (
+                        "Path to a YAML file with the same content you would put in the Mustache Variables yaml_text "
+                        "field. Use the 'choose file' button to browse the server's filesystem, or type a path; '~' "
+                        "expands to the home directory."
+                    ),
+                }),
+            },
+            "optional": {
+                "variable_sets": ("MUSTACHE_VARIABLE_LIST", {
+                    "tooltip": (
+                        "Optional concrete variable settings used to render the loaded YAML as a template before "
+                        "parsing, exactly like the variable_sets input of Mustache Variables."
+                    ),
+                }),
+            },
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, file_path, variable_sets=None):
+        # Hash the file so edits on disk re-run the node even when the path is unchanged.
+        try:
+            path = resolve_mustache_variables_path(file_path)
+            with open(path, "rb") as handle:
+                return hashlib.sha256(handle.read()).hexdigest()
+        except (OSError, ValueError):
+            return float("nan")
+
+    def load_variables(self, file_path, variable_sets=None):
+        yaml_text = load_mustache_variables_yaml_text(file_path)
+        variable_list = _normalize_mustache_variable_list_input(variable_sets)
+        rendered_yaml_inputs = render_mustache_yaml_inputs(yaml_text, variable_list)
+        variables = parse_mustache_variables_inputs(rendered_yaml_inputs)
+        logger.debug(
+            "LoadMustacheVariables node produced %d variable groups.",
+            len(_visible_mustache_variable_keys(variables)),
+        )
+        return (variables,)
+
+
+def _register_path_browser_route() -> None:
+    try:
+        from aiohttp import web
+        from server import PromptServer
+    except ImportError:  # pragma: no cover - only available inside a running ComfyUI server
+        return
+    instance = getattr(PromptServer, "instance", None)
+    if instance is None:  # pragma: no cover - defensive
+        return
+
+    @instance.routes.get("/skoogeer/mustache/browse")
+    async def _browse(request):  # pragma: no cover - exercised through ComfyUI
+        show_hidden = request.query.get("show_hidden", "").lower() in {"1", "true", "yes"}
+        try:
+            listing = list_directory_for_browser(request.query.get("path"), show_hidden=show_hidden)
+        except (OSError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response(listing)
+
+
+_register_path_browser_route()
+
+
 class MustacheVariable:
     CATEGORY = "text/template"
     RETURN_TYPES = ("MUSTACHE_VARIABLES",)
@@ -2152,6 +2279,7 @@ NODE_CLASS_MAPPINGS = {
     "ConcatenateLists": ConcatenateLists,
     "JoinTextList": JoinTextList,
     "ListSlice": ListSlice,
+    "LoadMustacheVariables": LoadMustacheVariables,
     "MergeMustacheVariableDefs": MergeMustacheVariableDefs,
     "MergeMustacheVariableSets": MergeMustacheVariableSets,
     "MustacheVariable": MustacheVariable,
@@ -2167,6 +2295,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ConcatenateLists": "Concatenate Lists",
     "JoinTextList": "Join Text List",
     "ListSlice": "List Slice",
+    "LoadMustacheVariables": "Load Mustache Variables",
     "MergeMustacheVariableDefs": "Merge Mustache Variable Defs",
     "MergeMustacheVariableSets": "Merge Mustache Variable Sets",
     "MustacheVariable": "Mustache Variable",

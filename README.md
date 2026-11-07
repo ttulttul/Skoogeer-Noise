@@ -150,6 +150,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Mustache Variable](#mustache-variable) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variable Set](#mustache-variable-set) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Variables](#mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
+| [Load Mustache Variables](#load-mustache-variables) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Merge Mustache Variable Defs](#merge-mustache-variable-defs) | `text/template` | `MUSTACHE_VARIABLES` |
 | [Mustache Variable Sampler](#mustache-variable-sampler) | `text/template` | `MUSTACHE_VARIABLE_LIST` |
 | [Mustache Template](#mustache-template) | `text/template` | `STRING` list |
@@ -595,6 +596,29 @@ Here both placeholders use the already-resolved `color` value from the current v
 - If only some values for a variable use a `:probability` suffix, the unspecified values split the remaining probability mass evenly. If every value is weighted explicitly, their probabilities must sum to `1.0`.
 - YAML parsing uses PyYAML's C-backed safe loader when it is available, which materially reduces CPU time for large templated-YAML batches.
 - The `variable_sets` input tolerates nested list wrappers from upstream list utilities and concatenation nodes, as long as the leaves are variable-setting dictionaries.
+
+---
+
+#### Load Mustache Variables
+
+Loads the YAML that you would otherwise type into the `yaml_text` field of `Mustache Variables` from a file, and parses it into a `MUSTACHE_VARIABLES` dictionary. Use it to keep large variable files such as [`sample.yaml`](sample.yaml) under version control or to share them between workflows.
+
+- **Menu category:** `text/template`
+- **Returns:** `MUSTACHE_VARIABLES`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `file_path` | `STRING` | empty | path | Path to the YAML file. The **choose file** button opens a browser over the ComfyUI server's filesystem; pick a file, or type a path and press **Use typed path**. You can also type straight into the field. `~` expands to the home directory, and relative paths resolve against ComfyUI's working directory. |
+| `variable_sets` | `MUSTACHE_VARIABLE_LIST` | – | optional | Same as on `Mustache Variables`: renders the loaded YAML as a template once per variable setting before parsing. |
+
+##### Notes
+
+- The file is parsed exactly like `Mustache Variables.yaml_text`, so every syntax feature, weight, and placeholder setting described above applies.
+- Files are read as UTF-8, and a leading byte-order mark is ignored.
+- The node hashes the file contents for change detection, so editing the file on disk re-runs the node on the next queue even though the path is unchanged.
+- The chooser lists paths on the machine running ComfyUI, not the machine running the browser. It is served by the `/skoogeer/mustache/browse` API route, which lets anyone who can reach your ComfyUI server list its directories, so keep the server on a trusted network.
 
 ---
 
