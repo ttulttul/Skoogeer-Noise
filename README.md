@@ -171,6 +171,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Latent Channel Match](#latent-channel-match) | `latent/channel` | `LATENT` |
 | [Latent Packed Slot Transform](#latent-packed-slot-transform) | `latent/channel` | `LATENT` |
 | [Latent Gaussian Blur](#latent-gaussian-blur) | `Latent/Filter` | `LATENT` |
+| [Mask Gaussian Blur](#mask-gaussian-blur) | `Mask/Filter` | `MASK` |
 | [Latent Frequency Split](#latent-frequency-split) | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
 | [Latent Frequency Merge](#latent-frequency-merge) | `Latent/Filter` | `LATENT` |
 | [Add Latent Noise (Seeded)](#add-latent-noise-seeded) | `Latent/Noise` | `LATENT` |
@@ -1177,6 +1178,23 @@ Gaussian blur for latents (supports both 4D and 5D latents).
 | `latent` | `LATENT` | – | – | Latent tensor to blur. |
 | `sigma` | `FLOAT` | `1.0` | `0.0..10.0` | Standard deviation for the Gaussian kernel. `0` is a no-op. |
 | `blur_mode` | enum | `Spatial Only` | `Spatial Only/Spatial and Channel` | When `Spatial and Channel`, also blurs across the channel dimension. |
+
+---
+
+#### Mask Gaussian Blur
+
+Gaussian blur for single-channel `MASK` tensors, for example to feather the edges of an inpainting mask. Accepts `(H,W)`, `(B,H,W)`, or `(B,1,H,W)` masks and returns the same shape, clamped to `0..1`.
+
+- **Menu category:** `Mask/Filter`
+- **Returns:** `MASK`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `mask` | `MASK` | – | – | Mask to blur. |
+| `sigma` | `FLOAT` | `4.0` | `0.0..100.0` | Standard deviation of the Gaussian kernel, in mask pixels. `0` is a no-op. |
+| `limit_mask` | `MASK` | – | optional | Limits where the blur applies; resized to the mask's resolution. |
 
 ---
 

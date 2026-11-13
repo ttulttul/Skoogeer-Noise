@@ -87,6 +87,78 @@ def test_latent_gaussian_blur_handles_video_latent():
     assert_flow_matching_shape(blurred, temporal=3, width=4, height=4)
 
 
+def test_mask_gaussian_blur_softens_edges_and_preserves_shape():
+    node = qnn.MaskGaussianBlur()
+    mask = torch.zeros(2, 32, 32)
+    mask[:, 8:24, 8:24] = 1.0
+
+    (blurred,) = node.blur_mask(mask, sigma=2.0)
+
+    assert blurred.shape == mask.shape
+    assert blurred.dtype == mask.dtype
+    assert not torch.allclose(blurred, mask)
+    assert blurred.min() >= 0.0 and blurred.max() <= 1.0
+    # Edges become fractional; center stays near full and far corners near zero.
+    assert 0.2 < float(blurred[0, 8, 16]) < 0.8
+    assert float(blurred[0, 16, 16]) > 0.99
+    assert float(blurred[0, 0, 0]) < 0.01
+
+
+def test_mask_gaussian_blur_zero_sigma_returns_original_object():
+    node = qnn.MaskGaussianBlur()
+    mask = torch.rand(1, 16, 16)
+
+    (result,) = node.blur_mask(mask, sigma=0.0)
+
+    assert result is mask
+
+
+def test_mask_gaussian_blur_accepts_2d_mask_and_large_sigma():
+    node = qnn.MaskGaussianBlur()
+    mask = torch.zeros(8, 8)
+    mask[4, 4] = 1.0
+
+    (blurred,) = node.blur_mask(mask, sigma=50.0)
+
+    assert blurred.shape == (8, 8)
+    assert torch.isfinite(blurred).all()
+    assert float(blurred.max()) < 1.0
+
+
+def test_mask_gaussian_blur_constant_mask_unchanged():
+    node = qnn.MaskGaussianBlur()
+    mask = torch.full((1, 16, 16), 0.5)
+
+    (blurred,) = node.blur_mask(mask, sigma=3.0)
+
+    assert torch.allclose(blurred, mask, atol=1e-6)
+
+
+def test_mask_gaussian_blur_limit_mask_restricts_area():
+    node = qnn.MaskGaussianBlur()
+    mask = torch.zeros(1, 32, 32)
+    mask[:, :, 16:] = 1.0
+    limit = torch.zeros(1, 32, 32)
+    limit[:, :16, :] = 1.0
+
+    (blurred,) = node.blur_mask(mask, sigma=2.0, limit_mask=limit)
+
+    assert torch.equal(blurred[:, 16:, :], mask[:, 16:, :])
+    assert not torch.allclose(blurred[:, :16, :], mask[:, :16, :])
+
+
+def test_mask_gaussian_blur_rejects_multichannel_tensor():
+    node = qnn.MaskGaussianBlur()
+
+    with pytest.raises(ValueError):
+        node.blur_mask(torch.rand(1, 3, 8, 8), sigma=1.0)
+
+
+def test_mask_gaussian_blur_registered():
+    assert qnn.NODE_CLASS_MAPPINGS["MaskGaussianBlur"] is qnn.MaskGaussianBlur
+    assert qnn.NODE_DISPLAY_NAME_MAPPINGS["MaskGaussianBlur"] == "Mask Gaussian Blur"
+
+
 def test_latent_add_noise_reproducible_with_seed():
     node = qnn.LatentAddNoise()
     latent = make_flow_matching_latent()
