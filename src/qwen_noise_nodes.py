@@ -1211,6 +1211,103 @@ class LatentGaussianBlur:
         return (out,)
 
 
+def _separable_gaussian_blur_nchw(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Separable Gaussian blur over the last two dims of an NCHW tensor.
+
+    Uses reflect padding when the image is large enough, otherwise replicate padding, so any sigma
+    works on any spatial size.
+    """
+    kernel_size = int(sigma * 6) + 1
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    radius = kernel_size // 2
+
+    axis = torch.arange(kernel_size, device=tensor.device, dtype=tensor.dtype) - radius
+    kernel_1d = torch.exp(-0.5 * torch.square(axis / sigma))
+    kernel_1d = kernel_1d / kernel_1d.sum()
+
+    channels = int(tensor.shape[1])
+    kernel_h = kernel_1d.view(1, 1, kernel_size, 1).repeat(channels, 1, 1, 1)
+    kernel_w = kernel_1d.view(1, 1, 1, kernel_size).repeat(channels, 1, 1, 1)
+
+    height, width = int(tensor.shape[-2]), int(tensor.shape[-1])
+    pad_mode = "reflect" if radius < height and radius < width else "replicate"
+
+    out = F.pad(tensor, (0, 0, radius, radius), mode=pad_mode)
+    out = F.conv2d(out, kernel_h, groups=channels)
+    out = F.pad(out, (radius, radius, 0, 0), mode=pad_mode)
+    out = F.conv2d(out, kernel_w, groups=channels)
+    return out
+
+
+class MaskGaussianBlur:
+    """Gaussian blur for single-channel ComfyUI MASK tensors."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK", {"tooltip": "Mask to blur."}),
+                "sigma": ("FLOAT", {
+                    "default": 4.0,
+                    "min": 0.0,
+                    "max": 100.0,
+                    "step": 0.1,
+                    "tooltip": "Standard deviation of the Gaussian kernel, in mask pixels. 0 returns the mask unchanged.",
+                }),
+            },
+            "optional": {
+                "limit_mask": ("MASK", {"tooltip": "Optional mask that limits where the blur applies. "
+                                                "It is resized to the mask's resolution."}),
+            },
+        }
+
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "blur_mask"
+    CATEGORY = "Mask/Filter"
+
+    def blur_mask(self, mask, sigma, limit_mask=None):
+        if not isinstance(mask, torch.Tensor):
+            raise ValueError(f"MASK input must be a torch.Tensor, got {type(mask)}.")
+        if sigma <= 0.0:
+            return (mask,)
+
+        original_shape = mask.shape
+        original_dtype = mask.dtype
+        original_device = mask.device
+
+        if mask.ndim == 2:
+            mask_nchw = mask.reshape(1, 1, *mask.shape)
+        elif mask.ndim == 3:
+            mask_nchw = mask.unsqueeze(1)
+        elif mask.ndim == 4 and int(mask.shape[1]) == 1:
+            mask_nchw = mask
+        else:
+            raise ValueError(
+                f"Expected mask tensor with shape (H,W), (B,H,W), or (B,1,H,W), got {tuple(mask.shape)}."
+            )
+
+        device = _get_device()
+        working = mask_nchw.to(device=device, dtype=torch.float32)
+        blurred = _separable_gaussian_blur_nchw(working, float(sigma))
+
+        if limit_mask is not None:
+            if not isinstance(limit_mask, torch.Tensor):
+                raise ValueError(f"limit_mask input must be a torch.Tensor, got {type(limit_mask)}.")
+            limit_nchw = prepare_mask_nchw(
+                limit_mask,
+                batch_size=int(working.shape[0]),
+                height=int(working.shape[-2]),
+                width=int(working.shape[-1]),
+                device=device,
+            )
+            blurred = blend_with_mask(working, blurred, limit_nchw)
+
+        blurred = blurred.clamp(0.0, 1.0)
+        result = blurred.reshape(original_shape).to(device=original_device, dtype=original_dtype)
+        return (result,)
+
+
 class LatentFrequencySplit:
     """Splits a latent into low- and high-frequency bands via Gaussian smoothing."""
 
@@ -3937,6 +4034,7 @@ NODE_CLASS_MAPPINGS: Dict[str, Any] = {
     "UnpatchifyFlux2Latent": UnpatchifyFlux2Latent,
     "PatchifyFlux2Latent": PatchifyFlux2Latent,
     "LatentGaussianBlur": LatentGaussianBlur,
+    "MaskGaussianBlur": MaskGaussianBlur,
     "LatentFrequencySplit": LatentFrequencySplit,
     "LatentFrequencyMerge": LatentFrequencyMerge,
     "LatentAddNoise": LatentAddNoise,
@@ -3966,6 +4064,7 @@ NODE_DISPLAY_NAME_MAPPINGS: Dict[str, str] = {
     "UnpatchifyFlux2Latent": "Unpatchify Flux.2 Latent",
     "PatchifyFlux2Latent": "Patchify Flux.2 Latent",
     "LatentGaussianBlur": "Latent Gaussian Blur",
+    "MaskGaussianBlur": "Mask Gaussian Blur",
     "LatentFrequencySplit": "Latent Frequency Split",
     "LatentFrequencyMerge": "Latent Frequency Merge",
     "LatentAddNoise": "Add Latent Noise (Seeded)",
