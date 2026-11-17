@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.58 - 2026-11-17
+- Added `Image Compare (Side by Side)`, the pack's first ComfyUI v3 (`comfy_api.latest`) node. It places two images side by side or stacked with a user-supplied label for each, modelled on Comfyroll's `CR Simple Image Compare`.
+- The `font` dropdown lists every font face installed on the ComfyUI server, by family and style. `SKOOGEER_FONT_DIRS` adds more folders, and `Pillow default` works when no fonts are installed.
+- Options cover label position (bottom, top, none), horizontal or vertical layout, how `image_b` is resized to match `image_a` (`fit`, `stretch`, `none`), gap, border, a dark or light theme, and an automatic font size. Batches are compared pair by pair.
+
 ## 1.2.57 - 2026-11-12
 - Added `Mask Gaussian Blur`, the `MASK` counterpart of `Latent Gaussian Blur`. It blurs `(H,W)`, `(B,H,W)`, or `(B,1,H,W)` masks with a separable Gaussian, keeps the input shape, and clamps to `0..1`. `sigma` goes up to `100` because masks are usually image-sized, and an optional `limit_mask` limits where the blur applies.
 

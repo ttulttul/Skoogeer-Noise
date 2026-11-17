@@ -165,6 +165,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [ImageToBatch](#imagetobatch) | `image/batch` | `IMAGE` |
 | [LatentToBatch](#latenttobatch) | `latent/batch` | `LATENT` |
 | [Latent Channel Stats Preview](#latent-channel-stats-preview) | `latent/debug` | `IMAGE` |
+| [Image Compare (Side by Side)](#image-compare-side-by-side) | `image/compare` | `IMAGE` |
 | [Latent Channel Linear Transform](#latent-channel-linear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Nonlinear Transform](#latent-channel-nonlinear-transform) | `latent/channel` | `LATENT` |
 | [Latent Channel Merge](#latent-channel-merge) | `latent/channel` | `LATENT` |
@@ -995,6 +996,38 @@ Renders a bar-chart preview of **per-channel mean and standard deviation** for `
 | `latent` | `LATENT` | – | – | Latent to analyze. |
 | `channel_limit` | `INT` | `16` | `1..64` | Number of channels to display. |
 | `height` | `INT` | `256` | `72..1024` | Output image height (layout adjusts automatically). |
+
+---
+
+#### Image Compare (Side by Side)
+
+Places two images side by side (or stacked) with a text label under or over each one, for before/after and A/B comparisons. It is a ComfyUI v3 (`comfy_api.latest`) node modelled on Comfyroll's `CR Simple Image Compare`. Labels can use any font installed on the machine running ComfyUI.
+
+- **Menu category:** `image/compare`
+- **Returns:** `IMAGE`
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `image_a` | `IMAGE` | – | – | First (left or top) image. |
+| `image_b` | `IMAGE` | – | – | Second (right or bottom) image. |
+| `label_a` | `STRING` | `A` | multiline | Label for `image_a`. Leave empty for no label. Long labels wrap to the image width. |
+| `label_b` | `STRING` | `B` | multiline | Label for `image_b`. |
+| `font` | `COMBO` | a common sans-serif if installed | installed fonts | Every font face found on the ComfyUI server, by family and style (for example `Arial Bold`). `Pillow default` works without any installed fonts. |
+| `font_size` | `INT` | `0` | `0..1024` | Label size in pixels. `0` uses 5% of the smaller image's shorter edge. |
+| `label_position` | `COMBO` | `bottom` | `bottom`, `top`, `none` | Where labels go; `none` hides them. |
+| `layout` | `COMBO` | `horizontal` | `horizontal`, `vertical` | Side by side, or stacked. |
+| `resize` | `COMBO` | `fit` | `fit`, `stretch`, `none` | How `image_b` is sized against `image_a`. `fit` matches the shared edge and keeps the aspect ratio, `stretch` matches both dimensions, `none` leaves it as is and centers it. |
+| `gap` | `INT` | `8` | `0..1024` | Space between the images in pixels. |
+| `border` | `INT` | `0` | `0..1024` | Margin around the whole output in pixels. |
+| `theme` | `COMBO` | `dark` | `dark`, `light` | White text on black, or black text on white. |
+
+##### Notes
+
+- Batches are compared pair by pair. A single image on one side is paired with every image on the other side; two batches of different sizes greater than one raise an error.
+- Fonts are found in the standard font folders (`/System/Library/Fonts`, `/Library/Fonts`, `~/Library/Fonts` on macOS; `/usr/share/fonts`, `/usr/local/share/fonts`, `~/.fonts`, `~/.local/share/fonts` on Linux; `%WINDIR%\Fonts` and the per-user font folder on Windows). Set `SKOOGEER_FONT_DIRS` (a path list using the OS path separator) to add more folders. The list is built once when ComfyUI starts, so restart ComfyUI after installing fonts.
+- A workflow saved on another machine may name a font that is not installed here. ComfyUI then flags the `font` widget until you pick an installed font.
 
 ---
 
