@@ -1006,6 +1006,8 @@ Places two images side by side (or stacked) with a text label under or over each
 - **Menu category:** `image/compare`
 - **Returns:** `IMAGE`
 
+![Image Compare example: two gradient images side by side with labels underneath](docs/examples/image-compare.png)
+
 ##### Inputs
 
 | Field | Type | Default | Range/Options | Notes |
