@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.62 - 2026-11-19
+- `Bounding Box` has a new `minimum_active` input and `empty` output. `empty` is true when the share of mask pixels above `threshold` (0 to 1, counted before noise filtering) is below `minimum_active`, and always true when no pixel is above `threshold`, so a switch node can skip later processing. Both were added last so saved workflows keep their widget values and links.
+
 ## 1.2.61 - 2026-11-19
 - `Bounding Box` has a new `bounded_mask` output: the input mask cropped to each box, from `(x, y)` to `(x + width, y + height)`. It is a `MASK` list with one crop per mask, because boxes in a batch can differ in size. An empty box gives a single zero pixel.
 
