@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.60 - 2026-11-19
+- Added `Bounding Box` (`Mask/Analysis`), which outputs the `x`, `y`, `width`, and `height` of the box around a mask's pixels above `threshold`, one box per mask in the batch, plus a `filtered_mask` showing the pixels that were bounded. `padding` grows the box, clamped to the mask.
+- `noise_filter = main_blob` ignores stray specks and clumps. It drops crumbs smaller than `min_clump_ratio` of the biggest clump, groups clumps within `merge_distance` empty pixels into blobs, and keeps the blob with the most total mask value (plus any blob scoring at least `secondary_blob_ratio` of it).
+- Blob grouping uses its own run-based connected-component labelling and summed-area dilation, so it needs no new dependencies and its speed does not depend on `merge_distance`.
+
 ## 1.2.59 - 2026-11-19
 - `Mustache Template` now honors `{{name:randomize}}` in its own template text. Each such placeholder draws a fresh value from the variable's original list (weights and nested references included), so `The sky is {{color}}. The clock is {{color:randomize}}.` gives the clock its own color within a single prompt. Previously the option was ignored there and every occurrence used the sampled value.
 - `{{name:repeat}}` in the template reuses the most recent value used for that variable in the same prompt. Plain `{{name}}` and `{{name:static}}` still use the sampled value, so existing templates render exactly as before.
