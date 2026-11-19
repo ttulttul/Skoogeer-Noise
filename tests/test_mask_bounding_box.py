@@ -63,12 +63,16 @@ def _bfs_component_count(binary: np.ndarray) -> int:
 def test_node_contract():
     assert NODE_CLASS_MAPPINGS == {"MaskBoundingBox": MaskBoundingBox}
     assert NODE_DISPLAY_NAME_MAPPINGS == {"MaskBoundingBox": "Bounding Box"}
-    assert MaskBoundingBox.RETURN_TYPES == ("INT", "INT", "INT", "INT", "MASK", "MASK")
-    assert MaskBoundingBox.RETURN_NAMES == ("x", "y", "width", "height", "filtered_mask", "bounded_mask")
-    assert MaskBoundingBox.OUTPUT_IS_LIST == (True, True, True, True, False, True)
+    assert MaskBoundingBox.RETURN_TYPES == ("INT", "INT", "INT", "INT", "MASK", "MASK", "BOOLEAN")
+    assert MaskBoundingBox.RETURN_NAMES == (
+        "x", "y", "width", "height", "filtered_mask", "bounded_mask", "empty"
+    )
+    assert MaskBoundingBox.OUTPUT_IS_LIST == (True, True, True, True, False, True, True)
     inputs = MaskBoundingBox.INPUT_TYPES()
     assert set(inputs["required"]) == {"mask", "threshold", "noise_filter"}
-    assert set(inputs["optional"]) == {"merge_distance", "secondary_blob_ratio", "min_clump_ratio", "padding"}
+    assert list(inputs["optional"]) == [
+        "merge_distance", "secondary_blob_ratio", "min_clump_ratio", "padding", "minimum_active"
+    ]
 
 
 def test_plain_box_covers_every_pixel_above_threshold():
@@ -183,7 +187,7 @@ def test_node_returns_lists_per_batch_item_and_filtered_mask():
     batch[0] = _scene()
     batch[1, 5:15, 6:26] = 0.8
 
-    x, y, width, height, filtered, _ = MaskBoundingBox().find_box(
+    x, y, width, height, filtered, _, _ = MaskBoundingBox().find_box(
         batch, threshold=0.5, noise_filter="main_blob", merge_distance=8
     )
 
@@ -200,7 +204,7 @@ def test_bounded_mask_is_the_input_cropped_to_each_box():
     batch[0, 45, 60] = 0.3  # below threshold, but inside the box, so it stays in the crop
     batch[1, 5:15, 6:26] = 0.8
 
-    x, y, width, height, _, bounded = MaskBoundingBox().find_box(
+    x, y, width, height, _, bounded, _ = MaskBoundingBox().find_box(
         batch, threshold=0.5, noise_filter="main_blob", merge_distance=8, padding=2
     )
 
@@ -222,11 +226,54 @@ def test_bounded_mask_crop_does_not_alias_the_input():
 
 
 def test_bounded_mask_for_empty_box_is_a_single_zero_pixel():
-    *_, bounded = MaskBoundingBox().find_box(torch.zeros(1, 8, 8), threshold=0.5, noise_filter="none")
+    *_, bounded, _ = MaskBoundingBox().find_box(torch.zeros(1, 8, 8), threshold=0.5, noise_filter="none")
 
     assert len(bounded) == 1
     assert bounded[0].shape == (1, 1, 1)
     assert float(bounded[0].sum()) == 0.0
+
+
+def _empty_output(mask, **kwargs):
+    kwargs.setdefault("threshold", 0.5)
+    kwargs.setdefault("noise_filter", "none")
+    return MaskBoundingBox().find_box(mask, **kwargs)[6]
+
+
+def test_empty_compares_active_share_with_minimum_active():
+    mask = torch.zeros(10, 10)
+    mask[0, 0:5] = 1.0  # 5 of 100 pixels: share 0.05
+
+    assert _empty_output(mask, minimum_active=0.0) == [False]
+    assert _empty_output(mask, minimum_active=0.05) == [False]
+    assert _empty_output(mask, minimum_active=0.0501) == [True]
+    assert _empty_output(mask, minimum_active=0.5) == [True]
+
+
+def test_empty_is_true_when_nothing_is_above_threshold_even_with_zero_minimum():
+    mask = torch.full((10, 10), 0.5)
+
+    assert _empty_output(mask, minimum_active=0.0) == [True]
+
+
+def test_empty_counts_pixels_before_noise_filtering():
+    mask = _scene()  # main subject plus stray clumps
+    share = float((mask > 0.5).float().mean())
+
+    assert _empty_output(mask, noise_filter="main_blob", minimum_active=share) == [False]
+    assert _empty_output(mask, noise_filter="main_blob", minimum_active=share + 1e-4) == [True]
+
+
+def test_empty_is_reported_per_batch_item():
+    batch = torch.zeros(3, 20, 20)
+    batch[0, :10, :] = 1.0  # share 0.5
+    batch[1, 0, 0] = 1.0  # share 0.0025
+
+    assert _empty_output(batch, minimum_active=0.01) == [False, True, True]
+
+
+def test_minimum_active_must_be_a_fraction():
+    with pytest.raises(ValueError, match="minimum_active"):
+        _empty_output(torch.zeros(4, 4), minimum_active=1.5)
 
 
 @pytest.mark.parametrize("shape", [(30, 40), (1, 30, 40), (1, 1, 30, 40)])

@@ -249,6 +249,19 @@ def mask_bounding_boxes(
     return boxes, filtered
 
 
+def active_shares(mask: torch.Tensor, threshold: float) -> List[float]:
+    """Return, for each mask in the batch, the fraction of its pixels strictly above ``threshold``."""
+    masks = _masks_bhw(mask)
+    if masks.shape[-1] * masks.shape[-2] == 0:
+        return [0.0] * int(masks.shape[0])
+    return [float(share) for share in (masks > float(threshold)).flatten(1).float().mean(dim=1).tolist()]
+
+
+def is_empty_mask(share: float, minimum_active: float) -> bool:
+    """A mask is empty when nothing is above threshold or the active share is below ``minimum_active``."""
+    return share <= 0.0 or share < float(minimum_active)
+
+
 def crop_mask_to_box(mask_hw: torch.Tensor, box: BoundingBox) -> torch.Tensor:
     """Return the ``(1, height, width)`` part of a 2-D mask inside ``box``.
 
@@ -264,15 +277,16 @@ class MaskBoundingBox:
     """Bounding box of a mask's above-threshold pixels, with optional removal of stray clumps."""
 
     CATEGORY = "Mask/Analysis"
-    RETURN_TYPES = ("INT", "INT", "INT", "INT", "MASK", "MASK")
-    RETURN_NAMES = ("x", "y", "width", "height", "filtered_mask", "bounded_mask")
-    OUTPUT_IS_LIST = (True, True, True, True, False, True)
+    RETURN_TYPES = ("INT", "INT", "INT", "INT", "MASK", "MASK", "BOOLEAN")
+    RETURN_NAMES = ("x", "y", "width", "height", "filtered_mask", "bounded_mask", "empty")
+    OUTPUT_IS_LIST = (True, True, True, True, False, True, True)
     FUNCTION = "find_box"
     DESCRIPTION = (
         "Finds the box around every mask pixel above threshold: x and y of the upper-left corner, "
         "width, and height. With noise_filter = main_blob it ignores stray specks and clumps and "
         "bounds only the blob holding the most mask value. bounded_mask is the input mask cropped "
-        "to the box."
+        "to the box. empty is true when too little of the mask is above threshold, for routing "
+        "through a switch node."
     )
 
     @classmethod
@@ -332,6 +346,18 @@ class MaskBoundingBox:
                     "max": MAX_PADDING,
                     "tooltip": "Grow the box by this many pixels on every side, clamped to the mask edges.",
                 }),
+                "minimum_active": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.0001,
+                    "round": False,
+                    "tooltip": (
+                        "The empty output is true when the share of mask pixels above threshold (0 to 1, "
+                        "counted before any noise filtering) is below this value. empty is always true "
+                        "when no pixel is above threshold. 0.01 means 'less than 1% of the mask'."
+                    ),
+                }),
             },
         }
 
@@ -344,7 +370,10 @@ class MaskBoundingBox:
         secondary_blob_ratio: float = 1.0,
         min_clump_ratio: float = 0.01,
         padding: int = 0,
+        minimum_active: float = 0.0,
     ):
+        if not 0.0 <= float(minimum_active) <= 1.0:
+            raise ValueError(f"minimum_active must be between 0 and 1, got {minimum_active}.")
         boxes, filtered = mask_bounding_boxes(
             mask,
             threshold=float(threshold),
@@ -354,11 +383,15 @@ class MaskBoundingBox:
             min_clump_ratio=float(min_clump_ratio),
             padding=int(padding),
         )
+        shares = active_shares(mask, float(threshold))
+        empty = [is_empty_mask(share, float(minimum_active)) for share in shares]
         logger.info(
-            "Bounding Box (%s, threshold=%.3f) found %s.",
+            "Bounding Box (%s, threshold=%.3f) found %s; active shares %s; empty %s.",
             noise_filter,
             threshold,
             ", ".join(f"({box.x}, {box.y}, {box.width}x{box.height})" for box in boxes),
+            ", ".join(f"{share:.4f}" for share in shares),
+            empty,
         )
         return (
             [box.x for box in boxes],
@@ -367,6 +400,7 @@ class MaskBoundingBox:
             [box.height for box in boxes],
             filtered,
             [crop_mask_to_box(layer, box) for layer, box in zip(_masks_bhw(mask), boxes)],
+            empty,
         )
 
 
