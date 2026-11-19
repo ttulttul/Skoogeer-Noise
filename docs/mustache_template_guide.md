@@ -227,6 +227,15 @@ commas (e.g., `{{variable:static,lowercase}}`).
 *   `{{color:repeat}}` - Reuses the *exact same value* that was randomly chosen for this variable earlier in the prompt. 
     *   *Use Case:* Matching details. `"A {{race_ethnicity}} woman and her {{race_ethnicity:repeat}} sister."` (Ensures both women generate with the same ethnicity).
 
+### 1.5 Behavior Operators in the Mustache Template Node
+The operators above describe how values are expanded inside your **Mustache Variables** YAML. In the **Mustache Template** node's own text, a plain `{{color}}` instead means "the value the sampler picked for this prompt", so repeated plain placeholders always match. Add `:randomize` when one spot should get its own draw:
+
+```
+The sky is {{color}}. The clock is {{color:randomize}}.
+```
+
+Keep the sampler's `limit` at `1` for a single prompt. `:repeat` reuses the most recent value for that variable in the same prompt, and `:static` uses the sampled value.
+
 ### 2. Formatting & Grammar Operators
 *   `{{word:lowercase}}` - Forces the output to lowercase. Great for injecting nouns mid-sentence.
 *   `{{word:propercase}}` - Capitalizes the first letter. Ideal when a variable happens to start a new sentence.

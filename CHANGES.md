@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.59 - 2026-11-19
+- `Mustache Template` now honors `{{name:randomize}}` in its own template text. Each such placeholder draws a fresh value from the variable's original list (weights and nested references included), so `The sky is {{color}}. The clock is {{color:randomize}}.` gives the clock its own color within a single prompt. Previously the option was ignored there and every occurrence used the sampled value.
+- `{{name:repeat}}` in the template reuses the most recent value used for that variable in the same prompt. Plain `{{name}}` and `{{name:static}}` still use the sampled value, so existing templates render exactly as before.
+- Template draws are seeded from the sampler's `seed` and each entry's position. `Mustache Variable Sampler` entries carry their source lists through `Merge Mustache Variable Sets` and the list utilities; entries without them fall back to the sampled value and log a warning.
+
 ## 1.2.58 - 2026-11-17
 - Added `Image Compare (Side by Side)`, the pack's first ComfyUI v3 (`comfy_api.latest`) node. It places two images side by side or stacked with a user-supplied label for each, modelled on Comfyroll's `CR Simple Image Compare`.
 - The `font` dropdown lists every font face installed on the ComfyUI server, by family and style. `SKOOGEER_FONT_DIRS` adds more folders, and `Pillow default` works when no fonts are installed.

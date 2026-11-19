@@ -700,6 +700,125 @@ def test_render_mustache_template_list_renders_repeated_placeholders():
     ]
 
 
+_RANDOMIZE_COLORS_YAML = (
+    "color:\n"
+    "  - red\n"
+    "  - blue\n"
+    "  - green\n"
+    "  - yellow\n"
+    "  - purple\n"
+    "  - orange\n"
+)
+_RANDOMIZE_COLORS = {"red", "blue", "green", "yellow", "purple", "orange"}
+
+
+def _render_sky_and_clock(template: str, seed: int):
+    variables = parse_mustache_variables_yaml(_RANDOMIZE_COLORS_YAML)
+    sampled = sample_mustache_variable_list(variables, sampling_mode="random", seed=seed, limit=1)
+    (rendered,) = render_mustache_template_list(template, sampled)
+    sky, clock = (part.split(" is ")[1] for part in rendered.rstrip(".").split(". "))
+    return sampled[0]["color"], sky, clock
+
+
+def test_render_mustache_template_list_randomize_draws_fresh_value_per_placeholder():
+    results = [
+        _render_sky_and_clock("The sky is {{color}}. The clock is {{color:randomize}}.", seed)
+        for seed in range(20)
+    ]
+
+    for sampled_color, sky, clock in results:
+        assert sky == sampled_color
+        assert clock in _RANDOMIZE_COLORS
+    assert any(sky != clock for _, sky, clock in results)
+
+
+def test_render_mustache_template_list_randomize_is_deterministic_for_sampler_seed():
+    template = "The sky is {{color:randomize}}. The clock is {{color:randomize}}."
+
+    assert [_render_sky_and_clock(template, seed) for seed in range(10)] == [
+        _render_sky_and_clock(template, seed) for seed in range(10)
+    ]
+
+
+def test_render_mustache_template_list_plain_placeholders_still_reuse_sampled_value():
+    for seed in range(10):
+        sampled_color, sky, clock = _render_sky_and_clock("The sky is {{color}}. The clock is {{color}}.", seed)
+        assert sky == clock == sampled_color
+
+
+def test_render_mustache_template_list_repeat_echoes_randomized_value():
+    for seed in range(10):
+        _, sky, clock = _render_sky_and_clock("The sky is {{color:randomize}}. The clock is {{color:repeat}}.", seed)
+        assert sky == clock
+
+
+def test_render_mustache_template_list_randomize_gives_each_setting_its_own_draws():
+    variables = parse_mustache_variables_yaml(_RANDOMIZE_COLORS_YAML)
+    sampled = sample_mustache_variable_list(variables, sampling_mode="sequential", seed=3, limit=-1)
+
+    rendered = render_mustache_template_list("{{color}} {{color:randomize,uppercase}}", sampled)
+
+    assert [line.split()[0] for line in rendered] == [setting["color"] for setting in sampled]
+    assert len({line.split()[1] for line in rendered}) > 1
+    assert all(line.split()[1].lower() in _RANDOMIZE_COLORS for line in rendered)
+
+
+def test_render_mustache_template_list_randomize_expands_lazy_references():
+    variables = parse_mustache_variables_yaml(
+        "shade:\n"
+        "  - light\n"
+        "  - dark\n"
+        "color:\n"
+        "  - {{shade}} red\n"
+        "  - {{shade}} blue\n"
+    )
+    sampled = sample_mustache_variable_list(variables, sampling_mode="random", seed=1, limit=1)
+
+    (rendered,) = render_mustache_template_list("{{color:randomize}}", sampled)
+
+    assert rendered in {"light red", "dark red", "light blue", "dark blue"}
+
+
+def test_render_mustache_template_list_randomize_survives_merge_with_plain_sets():
+    variables = parse_mustache_variables_yaml(_RANDOMIZE_COLORS_YAML)
+    sampled = sample_mustache_variable_list(variables, sampling_mode="random", seed=5, limit=1)
+    (merged,) = MergeMustacheVariableSets().merge(sampled, [{"subject": "fox"}])
+
+    (rendered,) = render_mustache_template_list(
+        "{{subject}} " + " ".join("{{color:randomize}}" for _ in range(8)),
+        merged,
+    )
+
+    words = rendered.split()
+    assert words[0] == "fox"
+    assert set(words[1:]) <= _RANDOMIZE_COLORS
+    assert len(set(words[1:])) > 1
+
+
+def test_render_mustache_template_list_randomize_without_sources_falls_back_with_warning(caplog):
+    with caplog.at_level("WARNING", logger="src.mustache_templates"):
+        rendered = render_mustache_template_list(
+            "{{color}} and {{color:randomize}}",
+            [{"color": "red"}],
+        )
+
+    assert rendered == ["red and red"]
+    assert "did not come from Mustache Variable Sampler" in caplog.text
+
+
+def test_sampled_variable_settings_survive_copy_and_pickle():
+    import copy
+    import pickle
+
+    variables = parse_mustache_variables_yaml(_RANDOMIZE_COLORS_YAML)
+    sampled = sample_mustache_variable_list(variables, sampling_mode="random", seed=9, limit=1)
+    template = " ".join("{{color:randomize}}" for _ in range(6))
+    expected = render_mustache_template_list(template, sampled)
+
+    assert render_mustache_template_list(template, copy.deepcopy(sampled)) == expected
+    assert render_mustache_template_list(template, pickle.loads(pickle.dumps(sampled))) == expected
+
+
 def test_render_mustache_template_list_preserves_literal_braces():
     rendered = render_mustache_template_list(
         "literal {curly} braces and {{subject}}",
