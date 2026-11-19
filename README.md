@@ -196,6 +196,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Patchify Flux.2 Latent](#patchify-flux2-latent) | `Latent/Flux` | `LATENT` |
 | [Models List](#models-list) | `model/batch` | `MODEL` list |
 | [Float Range](#float-range) | `utils/list` | `FLOAT` list, `INT` |
+| [Random Float](#random-float) | `utils/random` | `FLOAT` list |
 | [Model (RotorQuant Attention)](#model-rotorquant-attention) | `model/patch` | `MODEL` |
 | [Model (TurboQuant Attention)](#model-turboquant-attention) | `model/patch` | `MODEL` |
 | [Conditioning (Add Noise)](#conditioning-add-noise) | `conditioning/noise` | `CONDITIONING` |
@@ -1828,6 +1829,29 @@ Connect it to any `FLOAT` input, such as `KSampler.denoise`, and ComfyUI runs th
 - `0.3` to `0.9` with step `0.1` gives `[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]`. Values are rounded to 10 decimals, so there's no `0.30000000000000004`.
 - ComfyUI pairs list inputs by position and reuses the last item of a shorter list. It does not form every combination. To sweep 7 denoise values across the same 16 seeds, set `repeat_each` to 16 here (112 values), and give the seed input the 16 seeds repeated 7 times as a whole list.
 - The node raises an error for a zero step, a step pointing away from `stop`, non-finite bounds, or more than 10,000 values.
+
+---
+
+#### Random Float
+
+Emits seeded random floats between `min` and `max`. With `count` at `1` the output acts as a single `FLOAT`. With a larger `count` it is a list-valued `FLOAT`, so a downstream node such as `KSampler` runs once per value.
+
+- **Menu category:** `utils/random`
+- **Returns:** `values` (`FLOAT` list)
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `seed` | `INT` | `0` | `0..2^64-1` | The same seed always gives the same values. |
+| `min` | `FLOAT` | `0.0` | any finite value | Lower bound. |
+| `max` | `FLOAT` | `1.0` | any finite value | Upper bound. If `min` is larger than `max`, values still fall between the two. |
+| `count` | `INT` | `1` | `1`–`10000` | How many values to emit. |
+
+##### Notes
+
+- Values are drawn uniformly with Python's `random.Random(seed)`. Raising `count` adds values to the end and leaves the earlier ones unchanged.
+- Equal `min` and `max` give that value every time. Non-finite bounds raise an error.
 
 ---
 
