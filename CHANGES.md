@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.61 - 2026-11-19
+- `Bounding Box` has a new `bounded_mask` output: the input mask cropped to each box, from `(x, y)` to `(x + width, y + height)`. It is a `MASK` list with one crop per mask, because boxes in a batch can differ in size. An empty box gives a single zero pixel.
+
 ## 1.2.60 - 2026-11-19
 - Added `Bounding Box` (`Mask/Analysis`), which outputs the `x`, `y`, `width`, and `height` of the box around a mask's pixels above `threshold`, one box per mask in the batch, plus a `filtered_mask` showing the pixels that were bounded. `padding` grows the box, clamped to the mask.
 - `noise_filter = main_blob` ignores stray specks and clumps. It drops crumbs smaller than `min_clump_ratio` of the biggest clump, groups clumps within `merge_distance` empty pixels into blobs, and keeps the blob with the most total mask value (plus any blob scoring at least `secondary_blob_ratio` of it).

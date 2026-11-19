@@ -173,7 +173,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Latent Packed Slot Transform](#latent-packed-slot-transform) | `latent/channel` | `LATENT` |
 | [Latent Gaussian Blur](#latent-gaussian-blur) | `Latent/Filter` | `LATENT` |
 | [Mask Gaussian Blur](#mask-gaussian-blur) | `Mask/Filter` | `MASK` |
-| [Bounding Box](#bounding-box) | `Mask/Analysis` | `INT` ×4 (lists), `MASK` |
+| [Bounding Box](#bounding-box) | `Mask/Analysis` | `INT` ×4 (lists), `MASK`, `MASK` list |
 | [Latent Frequency Split](#latent-frequency-split) | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
 | [Latent Frequency Merge](#latent-frequency-merge) | `Latent/Filter` | `LATENT` |
 | [Add Latent Noise (Seeded)](#add-latent-noise-seeded) | `Latent/Noise` | `LATENT` |
@@ -1255,7 +1255,7 @@ Gaussian blur for single-channel `MASK` tensors, for example to feather the edge
 Finds the rectangle around a mask's pixels whose value is above `threshold`, as the `x`/`y` of the upper-left corner plus `width` and `height`, in mask pixels. With `noise_filter = main_blob`, it ignores stray specks and small clumps away from the subject and bounds only the main blob.
 
 - **Menu category:** `Mask/Analysis`
-- **Returns:** `x`, `y`, `width`, `height` (`INT` lists, one value per mask in the batch) and `filtered_mask` (`MASK`)
+- **Returns:** `x`, `y`, `width`, `height` (`INT` lists, one value per mask in the batch), `filtered_mask` (`MASK`), and `bounded_mask` (`MASK` list, one crop per mask)
 
 ##### Inputs
 
@@ -1282,7 +1282,8 @@ The box covers only the kept pixels; it is not stretched by the dilation used fo
 ##### Notes
 
 - Raise `merge_distance` if parts of the subject are being cut off. Lower it, or raise `min_clump_ratio`, if nearby junk is being included.
-- A mask with no pixels above threshold gives `x = y = width = height = 0` and logs a warning.
+- `bounded_mask` is the input mask cropped to the box, from `(x, y)` up to but not including `(x + width, y + height)`, with the original values (including any below-threshold or filtered-out pixels that fall inside the box). Boxes can differ in size across a batch, so it is a list with one `(1, height, width)` mask per input mask, and downstream nodes run once per crop.
+- A mask with no pixels above threshold gives `x = y = width = height = 0` and logs a warning; its `bounded_mask` is a single zero pixel.
 - Grouping runs in time independent of `merge_distance`; a 2048×2048 mask takes about 0.1 s on CPU.
 
 ---

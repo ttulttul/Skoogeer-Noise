@@ -17,6 +17,7 @@ from src.mask_bounding_box import (  # noqa: E402
     NODE_DISPLAY_NAME_MAPPINGS,
     BoundingBox,
     MaskBoundingBox,
+    crop_mask_to_box,
     dilate_for_gap,
     label_components,
     mask_bounding_boxes,
@@ -62,8 +63,9 @@ def _bfs_component_count(binary: np.ndarray) -> int:
 def test_node_contract():
     assert NODE_CLASS_MAPPINGS == {"MaskBoundingBox": MaskBoundingBox}
     assert NODE_DISPLAY_NAME_MAPPINGS == {"MaskBoundingBox": "Bounding Box"}
-    assert MaskBoundingBox.RETURN_TYPES == ("INT", "INT", "INT", "INT", "MASK")
-    assert MaskBoundingBox.RETURN_NAMES == ("x", "y", "width", "height", "filtered_mask")
+    assert MaskBoundingBox.RETURN_TYPES == ("INT", "INT", "INT", "INT", "MASK", "MASK")
+    assert MaskBoundingBox.RETURN_NAMES == ("x", "y", "width", "height", "filtered_mask", "bounded_mask")
+    assert MaskBoundingBox.OUTPUT_IS_LIST == (True, True, True, True, False, True)
     inputs = MaskBoundingBox.INPUT_TYPES()
     assert set(inputs["required"]) == {"mask", "threshold", "noise_filter"}
     assert set(inputs["optional"]) == {"merge_distance", "secondary_blob_ratio", "min_clump_ratio", "padding"}
@@ -181,7 +183,7 @@ def test_node_returns_lists_per_batch_item_and_filtered_mask():
     batch[0] = _scene()
     batch[1, 5:15, 6:26] = 0.8
 
-    x, y, width, height, filtered = MaskBoundingBox().find_box(
+    x, y, width, height, filtered, _ = MaskBoundingBox().find_box(
         batch, threshold=0.5, noise_filter="main_blob", merge_distance=8
     )
 
@@ -190,6 +192,41 @@ def test_node_returns_lists_per_batch_item_and_filtered_mask():
     assert float(filtered[0, 3, 3]) == 0.0  # stray speck removed
     assert float(filtered[0, 40, 50]) == 1.0
     assert torch.allclose(filtered[1], batch[1])  # original values kept
+
+
+def test_bounded_mask_is_the_input_cropped_to_each_box():
+    batch = torch.zeros(2, 100, 120)
+    batch[0] = _scene()
+    batch[0, 45, 60] = 0.3  # below threshold, but inside the box, so it stays in the crop
+    batch[1, 5:15, 6:26] = 0.8
+
+    x, y, width, height, _, bounded = MaskBoundingBox().find_box(
+        batch, threshold=0.5, noise_filter="main_blob", merge_distance=8, padding=2
+    )
+
+    assert [tuple(item.shape) for item in bounded] == [(1, 34, 44), (1, 14, 24)]
+    for index, item in enumerate(bounded):
+        expected = batch[index, y[index] : y[index] + height[index], x[index] : x[index] + width[index]]
+        assert torch.equal(item[0], expected)
+    assert float(bounded[0][0, 45 - y[0], 60 - x[0]]) == pytest.approx(0.3)
+
+
+def test_bounded_mask_crop_does_not_alias_the_input():
+    mask = torch.zeros(10, 10)
+    mask[2:5, 3:7] = 1.0
+
+    crop = crop_mask_to_box(mask, BoundingBox(3, 2, 4, 3))
+    crop.zero_()
+
+    assert float(mask.sum()) == 12.0
+
+
+def test_bounded_mask_for_empty_box_is_a_single_zero_pixel():
+    *_, bounded = MaskBoundingBox().find_box(torch.zeros(1, 8, 8), threshold=0.5, noise_filter="none")
+
+    assert len(bounded) == 1
+    assert bounded[0].shape == (1, 1, 1)
+    assert float(bounded[0].sum()) == 0.0
 
 
 @pytest.mark.parametrize("shape", [(30, 40), (1, 30, 40), (1, 1, 30, 40)])

@@ -249,18 +249,30 @@ def mask_bounding_boxes(
     return boxes, filtered
 
 
+def crop_mask_to_box(mask_hw: torch.Tensor, box: BoundingBox) -> torch.Tensor:
+    """Return the ``(1, height, width)`` part of a 2-D mask inside ``box``.
+
+    An empty box gives a ``(1, 1, 1)`` zero mask, because downstream nodes cannot handle a
+    mask with no pixels.
+    """
+    if box.is_empty:
+        return torch.zeros((1, 1, 1), dtype=mask_hw.dtype, device=mask_hw.device)
+    return mask_hw[box.y : box.y + box.height, box.x : box.x + box.width].unsqueeze(0).clone()
+
+
 class MaskBoundingBox:
     """Bounding box of a mask's above-threshold pixels, with optional removal of stray clumps."""
 
     CATEGORY = "Mask/Analysis"
-    RETURN_TYPES = ("INT", "INT", "INT", "INT", "MASK")
-    RETURN_NAMES = ("x", "y", "width", "height", "filtered_mask")
-    OUTPUT_IS_LIST = (True, True, True, True, False)
+    RETURN_TYPES = ("INT", "INT", "INT", "INT", "MASK", "MASK")
+    RETURN_NAMES = ("x", "y", "width", "height", "filtered_mask", "bounded_mask")
+    OUTPUT_IS_LIST = (True, True, True, True, False, True)
     FUNCTION = "find_box"
     DESCRIPTION = (
         "Finds the box around every mask pixel above threshold: x and y of the upper-left corner, "
         "width, and height. With noise_filter = main_blob it ignores stray specks and clumps and "
-        "bounds only the blob holding the most mask value."
+        "bounds only the blob holding the most mask value. bounded_mask is the input mask cropped "
+        "to the box."
     )
 
     @classmethod
@@ -354,6 +366,7 @@ class MaskBoundingBox:
             [box.width for box in boxes],
             [box.height for box in boxes],
             filtered,
+            [crop_mask_to_box(layer, box) for layer, box in zip(_masks_bhw(mask), boxes)],
         )
 
 
