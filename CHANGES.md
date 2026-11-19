@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.63 - 2026-11-19
+- Added `Random Float` (`utils/random`), which emits seeded random floats between `min` and `max`. `count` sets how many: `1` acts as a single `FLOAT`, and a larger count gives a `FLOAT` list so downstream nodes run once per value. Raising `count` keeps the earlier values unchanged.
+
 ## 1.2.62 - 2026-11-19
 - `Bounding Box` has a new `minimum_active` input and `empty` output. `empty` is true when the share of mask pixels above `threshold` (0 to 1, counted before noise filtering) is below `minimum_active`, and always true when no pixel is above `threshold`, so a switch node can skip later processing. Both were added last so saved workflows keep their widget values and links.
 
