@@ -173,6 +173,7 @@ Flux.2 VAEs patchify 2x2 at the final downscale step, producing 128-channel late
 | [Latent Packed Slot Transform](#latent-packed-slot-transform) | `latent/channel` | `LATENT` |
 | [Latent Gaussian Blur](#latent-gaussian-blur) | `Latent/Filter` | `LATENT` |
 | [Mask Gaussian Blur](#mask-gaussian-blur) | `Mask/Filter` | `MASK` |
+| [Bounding Box](#bounding-box) | `Mask/Analysis` | `INT` ×4 (lists), `MASK` |
 | [Latent Frequency Split](#latent-frequency-split) | `Latent/Filter` | `LATENT` (low), `LATENT` (high) |
 | [Latent Frequency Merge](#latent-frequency-merge) | `Latent/Filter` | `LATENT` |
 | [Add Latent Noise (Seeded)](#add-latent-noise-seeded) | `Latent/Noise` | `LATENT` |
@@ -1246,6 +1247,43 @@ Gaussian blur for single-channel `MASK` tensors, for example to feather the edge
 | `mask` | `MASK` | – | – | Mask to blur. |
 | `sigma` | `FLOAT` | `4.0` | `0.0..100.0` | Standard deviation of the Gaussian kernel, in mask pixels. `0` is a no-op. |
 | `limit_mask` | `MASK` | – | optional | Limits where the blur applies; resized to the mask's resolution. |
+
+---
+
+#### Bounding Box
+
+Finds the rectangle around a mask's pixels whose value is above `threshold`, as the `x`/`y` of the upper-left corner plus `width` and `height`, in mask pixels. With `noise_filter = main_blob`, it ignores stray specks and small clumps away from the subject and bounds only the main blob.
+
+- **Menu category:** `Mask/Analysis`
+- **Returns:** `x`, `y`, `width`, `height` (`INT` lists, one value per mask in the batch) and `filtered_mask` (`MASK`)
+
+##### Inputs
+
+| Field | Type | Default | Range/Options | Notes |
+|------|------|---------|--------------|------|
+| `mask` | `MASK` | – | – | `(H,W)`, `(B,H,W)`, or `(B,1,H,W)`. A batch gives one box per mask. |
+| `threshold` | `FLOAT` | `0.5` | `0.0..1.0` | Pixels strictly greater than this count as part of the mask. |
+| `noise_filter` | enum | `none` | `none/main_blob` | `none` bounds every pixel above threshold. `main_blob` bounds only the main blob (see below). |
+| `merge_distance` | `INT` | `16` | `0..1024` | `main_blob` only. Clumps separated by up to this many empty pixels (along rows, columns, or diagonals) count as one blob. `0` means pixels must touch. |
+| `secondary_blob_ratio` | `FLOAT` | `1.0` | `0.0..1.0` | `main_blob` only. Also keep other blobs whose score is at least this fraction of the main blob's. `1.0` keeps only the main blob. |
+| `min_clump_ratio` | `FLOAT` | `0.01` | `0.0..1.0` | `main_blob` only. Before grouping, drop connected clumps scoring below this fraction of the biggest clump. `0` keeps every clump. |
+| `padding` | `INT` | `0` | `0..16384` | Grows the box on every side, clamped to the mask edges. |
+
+##### How `main_blob` picks the main blob
+
+A blob's **score** is the sum of the mask values of its above-threshold pixels, so a large, solid region beats a small bright speck, and soft mask values count for less than full ones.
+
+1. **Drop crumbs.** The above-threshold pixels are split into 8-connected clumps. Clumps scoring less than `min_clump_ratio` of the biggest clump are dropped, so scattered specks cannot chain into a giant blob in step 2. The cutoff is relative, so a mask made only of small dots (for example, a dithered one) still keeps them.
+2. **Group nearby clumps.** Clumps within `merge_distance` empty pixels of each other are grouped into one blob, so a subject broken into pieces (fingers, hair, a gap at a thin limb) stays together.
+3. **Keep the winner.** The blob with the highest score is kept, along with any blob scoring at least `secondary_blob_ratio` of it, for example both eyes in an eye mask with `secondary_blob_ratio = 0.5`.
+
+The box covers only the kept pixels; it is not stretched by the dilation used for grouping. `filtered_mask` holds the original mask values for the kept pixels and zero elsewhere, which makes it easy to preview what was bounded.
+
+##### Notes
+
+- Raise `merge_distance` if parts of the subject are being cut off. Lower it, or raise `min_clump_ratio`, if nearby junk is being included.
+- A mask with no pixels above threshold gives `x = y = width = height = 0` and logs a warning.
+- Grouping runs in time independent of `merge_distance`; a 2048×2048 mask takes about 0.1 s on CPU.
 
 ---
 
