@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 _SEED_MASK_64 = 0xFFFFFFFFFFFFFFFF
 _SEED_STREAM_INCREMENT = 0x9E3779B97F4A7C15
+MAX_NEXT_SEEDS_COUNT = 4096
+"""Most seeds Next Seeds emits per output; also its count widget maximum."""
 
 
 def generate_seed(x: int) -> int:
@@ -300,7 +302,7 @@ class NextSeeds:
                 "count": ("INT", {
                     "default": 1,
                     "min": 1,
-                    "max": 4096,
+                    "max": MAX_NEXT_SEEDS_COUNT,
                     "tooltip": (
                         "How many seeds to emit per output. A count of 1 preserves the original four-way seed "
                         "fan-out; higher counts extend each output's deterministic seed stream."
@@ -311,6 +313,15 @@ class NextSeeds:
 
     def next_seeds(self, seed: int, count: int):
         count_value = int(count)
+        if not 1 <= count_value <= MAX_NEXT_SEEDS_COUNT:
+            # ComfyUI checks widget min/max only for typed-in values, so a linked count can arrive
+            # out of range, for example from a Primitive Int whose control is set to randomize.
+            raise ValueError(
+                f"Next Seeds count must be between 1 and {MAX_NEXT_SEEDS_COUNT}, got {count_value}. "
+                "If count is connected to another node, that node is sending an out-of-range value; "
+                "a Primitive Int set to 'randomize' does this. Set its control to 'fixed' or "
+                "disconnect count to use the widget."
+            )
         derived = next_seed_output_lists(seed, output_count=4, count_per_output=count_value)
         logger.debug(
             "NextSeeds node expanded seed=%d into 4 outputs with count=%d: %s",

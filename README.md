@@ -397,6 +397,7 @@ This is the MurmurHash3 64-bit finalizer, used here as a strong bit-mixing funct
 - The arithmetic is masked back to `0..2^64-1` after each step, so the outputs stay valid ComfyUI 64-bit seeds.
 - The node mixes offset stream values instead of repeatedly mixing the raw input directly. That avoids the `seed = 0` fixed-point case (`0` would otherwise mix back to `0`) and gives distinct outputs even from simple nearby inputs.
 - When `count > 1`, the node generates `4 * count` mixed values and de-interleaves them back into four per-output streams. That keeps each output's first emitted seed identical to the old scalar behavior while extending the same stream deterministically for the remaining list entries.
+- ComfyUI enforces the `count` range only for typed-in values, so the node checks it again at run time. If `count` is connected to a node that sends a value outside `1..4096`, such as a `Primitive Int` set to `randomize`, the run stops with an error that says so instead of hanging on a huge count.
 
 ##### Notes
 
