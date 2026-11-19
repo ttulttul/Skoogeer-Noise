@@ -770,6 +770,20 @@ def _normalize_mustache_variable_list_input(variables) -> MustacheVariableList |
     return flattened
 
 
+def _merge_variable_settings(left_item: Dict[str, str], right_item: Dict[str, str]) -> Dict[str, str]:
+    values = {**left_item, **right_item}
+    left_sources = getattr(left_item, "source_variables", ())
+    right_sources = getattr(right_item, "source_variables", ())
+    if not left_sources and not right_sources:
+        return values
+    render_seed = right_item.render_seed if right_sources else left_item.render_seed
+    return _SampledVariableSetting(
+        values,
+        source_variables=tuple(left_sources) + tuple(right_sources),
+        render_seed=render_seed,
+    )
+
+
 def merge_mustache_variable_lists(
     variables_1,
     variables_2,
@@ -781,9 +795,9 @@ def merge_mustache_variable_lists(
     right = [] if right is None else right
 
     if not left:
-        return [dict(item) for item in right]
+        return [_copy_variable_setting(item) for item in right]
     if not right:
-        return [dict(item) for item in left]
+        return [_copy_variable_setting(item) for item in left]
 
     if len(left) == len(right):
         pairs = zip(left, right, strict=True)
@@ -799,7 +813,7 @@ def merge_mustache_variable_lists(
 
     merged: MustacheVariableList = []
     for left_item, right_item in pairs:
-        merged.append({**left_item, **right_item})
+        merged.append(_merge_variable_settings(left_item, right_item))
 
     logger.debug(
         "Merged MUSTACHE_VARIABLE_LIST inputs of lengths %d and %d into %d entries.",
@@ -953,6 +967,123 @@ class _LazyFormatMapView:
 
         self.repeated_choices[variable_name] = raw_value
         return _apply_template_instance_settings(raw_value, settings)
+
+
+class _SampledVariableSetting(dict):
+    """A concrete variable setting that remembers where its values came from.
+
+    It compares and behaves like the plain ``Dict[str, str]`` it wraps. The
+    extra attributes let ``Mustache Template`` honor ``{{name:randomize}}`` by
+    drawing fresh values from the original variable definitions, using a
+    per-setting seed derived from the sampler seed so renders stay
+    deterministic.
+    """
+
+    def __init__(
+        self,
+        values: Dict[str, str],
+        *,
+        source_variables: tuple[MustacheVariablesDict, ...] = (),
+        render_seed: int = 0,
+    ):
+        super().__init__(values)
+        self.source_variables = tuple(source_variables)
+        self.render_seed = int(render_seed)
+
+
+def _derive_setting_render_seed(seed: int, setting_index: int) -> int:
+    digest = hashlib.blake2b(f"{int(seed)}:{int(setting_index)}".encode("ascii"), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
+
+
+def _setting_source_variables(setting: Dict[str, str]) -> tuple[MustacheVariablesDict, ...]:
+    return tuple(getattr(setting, "source_variables", ()))
+
+
+def _copy_variable_setting(setting: Dict[str, str]) -> Dict[str, str]:
+    sources = _setting_source_variables(setting)
+    if not sources:
+        return dict(setting)
+    return _SampledVariableSetting(setting, source_variables=sources, render_seed=setting.render_seed)
+
+
+def _find_source_variables_for(
+    setting: Dict[str, str],
+    variable_name: str,
+) -> MustacheVariablesDict | None:
+    if variable_name in _RESERVED_VARIABLE_KEYS:
+        return None
+    for source in reversed(_setting_source_variables(setting)):
+        if isinstance(source.get(variable_name), list):
+            return source
+    return None
+
+
+class _TemplateFormatMapView:
+    """Resolve ``Mustache Template`` placeholders for one concrete setting.
+
+    Plain and ``static`` placeholders use the sampled value. ``randomize``
+    draws a fresh value from the setting's source definitions, and ``repeat``
+    reuses the most recent value used for that variable in this render.
+    """
+
+    __slots__ = (
+        "setting",
+        "resolved_variables",
+        "field_name_to_variable",
+        "field_name_to_settings",
+        "rng",
+        "repeated_choices",
+        "unrandomizable_variables",
+    )
+
+    def __init__(
+        self,
+        setting: Dict[str, str],
+        field_name_to_variable: Dict[str, str],
+        field_name_to_settings: Dict[str, TemplateInstanceSettings],
+    ):
+        self.setting = setting
+        self.resolved_variables = dict(setting)
+        self.field_name_to_variable = field_name_to_variable
+        self.field_name_to_settings = field_name_to_settings
+        self.rng: random.Random | None = None
+        self.repeated_choices: Dict[str, str] = {}
+        self.unrandomizable_variables: List[str] = []
+
+    def __getitem__(self, field_name: str) -> str:
+        variable_name = self.field_name_to_variable.get(field_name, field_name)
+        settings = self.field_name_to_settings.get(field_name, ())
+        selection_settings = [setting for setting in settings if setting in _TEMPLATE_SELECTION_SETTINGS]
+        selection_setting = selection_settings[0] if selection_settings else None
+
+        if selection_setting == "randomize":
+            raw_value = self._randomize(variable_name)
+        elif selection_setting == "repeat" and variable_name in self.repeated_choices:
+            raw_value = self.repeated_choices[variable_name]
+        else:
+            raw_value = self.setting[variable_name]
+
+        self.repeated_choices[variable_name] = raw_value
+        return _apply_template_instance_settings(raw_value, settings)
+
+    def _randomize(self, variable_name: str) -> str:
+        source = _find_source_variables_for(self.setting, variable_name)
+        if source is None:
+            if variable_name not in self.unrandomizable_variables:
+                self.unrandomizable_variables.append(variable_name)
+            return self.setting[variable_name]
+        if self.rng is None:
+            self.rng = random.Random(getattr(self.setting, "render_seed", 0))
+        try:
+            return _choose_random_lazy_variable_value(
+                variable_name,
+                variables=source,
+                resolved_variables=self.resolved_variables,
+                rng=self.rng,
+            )
+        except ValueError as exc:
+            raise ValueError(f"Mustache template could not randomize '{variable_name}': {exc}") from exc
 
 
 def _escape_format_literal(text: str) -> str:
@@ -1613,16 +1744,21 @@ def sample_mustache_variable_list(
             )
         ]
 
-    sampled_variables = [
-        _render_variable_setting_from_indices(
-            ordered_keys,
-            value_sets,
-            template_spec_sets,
-            selection_indices,
-            variables=variables,
-            rng=rng,
+    normalized_seed = int(seed) & _SEED_MASK_64
+    sampled_variables: MustacheVariableList = [
+        _SampledVariableSetting(
+            _render_variable_setting_from_indices(
+                ordered_keys,
+                value_sets,
+                template_spec_sets,
+                selection_indices,
+                variables=variables,
+                rng=rng,
+            ),
+            source_variables=(variables,),
+            render_seed=_derive_setting_render_seed(normalized_seed, setting_index),
         )
-        for selection_indices in sampled_selection_indices
+        for setting_index, selection_indices in enumerate(sampled_selection_indices)
     ]
 
     logger.debug(
@@ -1655,6 +1791,13 @@ def render_mustache_template_list(
         )
         return [template_text for _ in variable_list]
 
+    uses_lazy_selection = any(
+        setting in ("randomize", "repeat")
+        for settings in field_name_to_settings.values()
+        for setting in settings
+    )
+    unrandomizable_variables: List[str] = []
+
     rendered_outputs: List[str] = []
     for setting_index, variables in enumerate(variable_list):
         if not isinstance(variables, dict):
@@ -1662,14 +1805,28 @@ def render_mustache_template_list(
                 f"MUSTACHE_VARIABLE_LIST items must be dictionaries, got {type(variables).__name__} at index {setting_index}."
             )
         try:
-            rendered_outputs.append(
-                _render_compiled_template(compiled_format, field_name_to_variable, field_name_to_settings, variables)
-            )
+            if uses_lazy_selection:
+                view = _TemplateFormatMapView(variables, field_name_to_variable, field_name_to_settings)
+                rendered_outputs.append(compiled_format.format_map(view))
+                for variable_name in view.unrandomizable_variables:
+                    if variable_name not in unrandomizable_variables:
+                        unrandomizable_variables.append(variable_name)
+            else:
+                rendered_outputs.append(
+                    _render_compiled_template(compiled_format, field_name_to_variable, field_name_to_settings, variables)
+                )
         except KeyError:
             missing = [name for name in referenced_variables if name not in variables]
             raise ValueError(
                 f"Mustache template references undefined variables in entry {setting_index}: {', '.join(sorted(missing))}"
             )
+
+    if unrandomizable_variables:
+        logger.warning(
+            "Mustache template used ':randomize' for %s, but the incoming variable sets do not carry the original "
+            "value lists (they did not come from Mustache Variable Sampler), so the sampled value was used instead.",
+            ", ".join(unrandomizable_variables),
+        )
 
     logger.debug(
         "Rendered mustache template for %d variable settings into %d strings.",
@@ -2023,7 +2180,8 @@ class MustacheTemplate:
                     "multiline": True,
                     "tooltip": (
                         "Template text containing placeholders like {{haircolor}}. The node renders the template once "
-                        "for each variable-setting entry."
+                        "for each variable-setting entry. Plain placeholders use the sampled value; "
+                        "{{name:randomize}} draws a fresh value from the variable's original list."
                     ),
                 }),
             },
