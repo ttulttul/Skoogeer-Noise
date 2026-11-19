@@ -1,6 +1,7 @@
 import pathlib
 import sys
 
+import pytest
 import torch
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -177,6 +178,18 @@ def test_next_seeds_node_returns_expected_seed_fanout():
         [0x026450D10CF97BDE],
     )
     assert node.OUTPUT_IS_LIST == (True, True, True, True)
+
+
+@pytest.mark.parametrize("count", [0, -1061846320475019, 4097, 1061846320475019])
+def test_next_seeds_node_rejects_out_of_range_count_with_a_helpful_message(count):
+    with pytest.raises(ValueError, match=r"between 1 and 4096, got .*Primitive Int set to 'randomize'"):
+        NextSeeds().next_seeds(123456789, count=count)
+
+
+def test_next_seeds_node_accepts_the_maximum_count():
+    outputs = NextSeeds().next_seeds(123456789, count=4096)
+
+    assert [len(values) for values in outputs] == [4096] * 4
 
 
 def test_next_seeds_node_returns_list_outputs_when_count_is_greater_than_one():

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.63 - 2026-11-19
+- `Next Seeds` now checks `count` at run time and raises a clear error when it is outside `1..4096`. ComfyUI only enforces widget ranges for typed-in values, so a linked count, for example from a `Primitive Int` set to `randomize`, could arrive as a huge negative number (a confusing `count_per_output must be positive` error) or a huge positive one (an effectively endless run).
+
 ## 1.2.62 - 2026-11-19
 - `Bounding Box` has a new `minimum_active` input and `empty` output. `empty` is true when the share of mask pixels above `threshold` (0 to 1, counted before noise filtering) is below `minimum_active`, and always true when no pixel is above `threshold`, so a switch node can skip later processing. Both were added last so saved workflows keep their widget values and links.
 
